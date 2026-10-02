@@ -40,7 +40,7 @@ Or copy `plugins/plan-progress` into `~/.claude/skills/plan-progress` to load it
 
 ### How it works
 
-The mod registers a `plan_progress` tool. Claude creates a bar once with the full breakdown, then sends short updates such as `{id, next: true}` or `{id, done: ["Routes"]}`; a step name the bar does not have is refused with the list of its steps. Agent strips come from engine events alone and cost no tokens. Updates cost a few dozen tokens and the rules sit in the cached system prompt. A light gate asks Claude to create a bar before a task with several edits, and reminds it when a bar goes stale. A plan approved in plan mode becomes the bar `plan`.
+The mod registers a `plan_progress` tool. Claude creates a bar once with the full breakdown, then sends short updates such as `{id, next: true}` or `{id, done: ["Routes"]}`; a step name the bar does not have is refused with the list of its steps. Agent strips come from engine events alone and cost no tokens. Updates cost a few dozen tokens and the rules sit in the tool's cached description. A light gate asks Claude to create a bar before a task with several edits, and reminds it when a bar goes stale.
 
 The track is drawn as a still image and the hover parts sit in a see-through layer on top, so agent updates redraw only their own strip and nothing flickers.
 

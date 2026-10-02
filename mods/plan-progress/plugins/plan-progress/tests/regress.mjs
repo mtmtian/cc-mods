@@ -46,23 +46,6 @@ const C = {
     const req = E.toolSpec.inputSchema.properties.stages.items.properties.steps.items.required
     return [`${E.steps('t')}; ${res(r)}; required ${req}`, E.steps('t') === 'A:active B:pending' && req.join() === 'title']
   },
-  async T08_reimport_keeps_done(E) {
-    const plan = '# Fix login\n\n## Analyse\n- Read code\n- Find bug\n## Fix\n- Patch\n- Test'
-    await E.exitPlan({ result: { plan } })
-    await E.call({ id: 'plan', next: true })
-    await E.call({ id: 'plan', next: true })
-    await E.exitPlan({ result: { plan: plan + '\n- Deploy' } })
-    return [E.steps('plan'), E.steps('plan') === 'Read code:done Find bug:done Patch:active Test:pending Deploy:pending']
-  },
-  async T09_new_title_same_bar(E) {
-    await E.exitPlan({ result: { plan: '# Fix login\n## A\n- One\n- Two\n## B\n- Three' } })
-    await E.exitPlan({ result: { plan: '# Fix login flow\n## A\n- One\n- Two\n## B\n- Three' } })
-    return [`${E.plans().map(p => `${p.id}:${p.title}`)}`, E.plans().length === 1 && E.bar('plan').title === 'Fix login flow']
-  },
-  async T10_ticked_boxes(E) {
-    await E.exitPlan({ result: { plan: '# Ship\n- [x] Read code\n- [x] Find bug\n- [ ] Patch' } })
-    return [E.steps('plan'), E.steps('plan') === 'Read code:done Find bug:done Patch:active']
-  },
   async T11_active_forward_unchanged(E) {
     await create(E)
     await E.call({ id: 't', active: 'C' })
@@ -97,12 +80,6 @@ const C = {
     await E.agentTool('ag1', 'Grep')
     const src = (await E.view('t')).source
     return [`strip ${src.includes('Scan tests')}, tool ${src.includes('Grep')}`, src.includes('Scan tests') && src.includes('Grep')]
-  },
-  async T16b_strips_survive_import(E) {
-    await E.exitPlan({ result: { plan: '# P\n## A\n- One\n## B\n- Two' } })
-    await E.spawn('ag1', 'Scan tests')
-    await E.exitPlan({ result: { plan: '# P\n## A\n- One\n## B\n- Two\n- Three' } })
-    return [`${E.bar('plan').agents?.map(a => a.title)}`, E.bar('plan').agents?.length === 1]
   },
   async T19_parallel_next(E) {
     await create(E)
@@ -160,12 +137,6 @@ const C = {
     const step = E.toolSpec.inputSchema.properties.stages.items.properties.steps.items.properties
     return [Object.keys(step).join(), !('substeps' in step)]
   },
-  async T30_T31_no_import(E) {
-    await E.exitPlan({ deny: 'no' })
-    await E.exitPlan({ isError: true, result: { plan: '# X\n- a\n- b' } })
-    await E.exitPlan({ result: { plan: null } })
-    return [`${E.plans().length} bars`, E.plans().length === 0]
-  },
   async T32_next_wraps_back(E) {
     await E.call({ id: 't', title: 'Task', stages: [S('One', 'A', st('B', 'active'), 'C')] })
     await E.call({ id: 't', next: true })
@@ -174,18 +145,29 @@ const C = {
     await E.call({ id: 't', next: true })
     return [`${a} → ${E.steps('t')} ${E.bar('t').state}`, a === 'A:active B:done C:done' && E.bar('t').state === 'done']
   },
-  async N1_model_told_bar_id(E) {
-    const r = await E.exitPlan({ result: { plan: '# Fix login\n## A\n- One\n## B\n- Two' } })
-    return [`${r.context}`, (r.context ?? []).some(c => c.includes('"plan"'))]
-  },
   async N2_one_bar_one_block(E) {
     await E.turnStart()
-    await E.exitPlan({ result: { plan: '# Fix login\n## A\n- One\n## B\n- Two' } })
+    await create(E, 'login', [S('A', 'One'), S('B', 'Two')], 'Fix login')
     await E.work('Edit')
-    await E.call({ id: 'plan', next: true })
-    await E.call({ id: 'plan', next: true })
+    await E.call({ id: 'login', next: true })
+    await E.call({ id: 'login', next: true })
     const r = await E.stop('All set.')
-    return [`${E.plans().length} bar, ${E.bar('plan').state}, stop ${r.block ? 'blocked' : 'passes'}`, E.plans().length === 1 && !r.block]
+    return [`${E.plans().length} bar, ${E.bar('login').state}, stop ${r.block ? 'blocked' : 'passes'}`, E.plans().length === 1 && !r.block]
+  },
+  // cc-mods: the rules ride in the tool description, so engines without prompt.compose still carry them
+  async cc_rules_in_tool_description(E) {
+    const d = E.toolSpec.description ?? ''
+    return [d.slice(0, 60), d.includes('Tasks needing more than ~3 edits') && d.includes('needs_input')]
+  },
+  // cc-mods: plan mode is not wired any more; an approved plan passes through untouched and makes no bar
+  async cc_exit_plan_mode_untouched(E) {
+    const r = await E.exitPlan({ result: { plan: '# Fix login\n## A\n- One\n## B\n- Two' } })
+    return [`${E.plans().length} bars, context ${JSON.stringify(r.context ?? null)}`, E.plans().length === 0 && r.context === undefined]
+  },
+  // cc-mods: the demo-reel entry is gone; "reel" with a note is an ordinary id, refused until it has stages
+  async cc_reel_entry_gone(E) {
+    const r = await E.call({ id: 'reel', note: '/tmp/plan-progress-reel.json' })
+    return [res(r), (r.deny ?? '').includes('no bar "reel" yet') && E.plans().length === 0]
   },
   async done_on_active_moves_on(E) {
     await create(E)

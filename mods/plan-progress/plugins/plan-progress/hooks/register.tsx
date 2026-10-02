@@ -25,8 +25,9 @@ const STATUSES: StepStatus[] = ['pending', 'active', 'done', 'error', 'skipped']
 const TRACK_H = 22
 const NARROW = 360
 
-const RULES = `# Progress bars
-Tasks needing more than ~3 edits or commands get a bar via ${TOOL}: create it once with the full breakdown (2-7 stages of steps {title}, or kind "todo" for one flat list; titles of at most 4 words, in the user's language; the first open step becomes active), then move it with short calls: {id, next:true} when the active step is finished, or {id, done:[...], active:"..."}, {id, failed:"...", note}. When the plan changes, resend stages under the same id; steps sent without a status keep their done by title. Send state "needs_input" with a note before asking the user to decide. Never describe the bars to the user.`
+// the working rules ride in the tool's description: cached like the system prompt, and the description is there on
+// every engine that has tools, where the system-prompt event (prompt.compose) is not
+const RULES = `Live progress bar above the prompt, one per id. Tasks needing more than ~3 edits or commands get a bar: create it once with the full breakdown (2-7 stages of steps {title}, or kind "todo" for one flat list; titles of at most 4 words, in the user's language; the first open step becomes active), then move it with short calls: {id, next:true} when the active step is finished, or {id, done:[...], active:"..."}, {id, failed:"...", note}. When the plan changes, resend stages under the same id; steps sent without a status keep their done by title. Send state "needs_input" with a note before asking the user to decide. Never describe the bars to the user.`
 
 type Raw = Record<string, unknown>
 const str = (v: unknown, max = 120) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : '')
@@ -145,61 +146,6 @@ function pointAt(stages: PlanStage[]): PlanStage[] {
   if (steps.some(st => st.status === 'active' || st.status === 'error')) return stages
   const first = steps.find(st => st.status === 'pending')
   return stages.map(s => ({ ...s, steps: s.steps.map(st => (st === first ? { ...st, status: 'active' as const } : st)) }))
-}
-
-// the bar an approved plan-mode plan lands on; a revised plan updates it instead of opening a second one
-const PLAN_ID = 'plan'
-
-const clean = (s: string) =>
-  s
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/[*_`]/g, '')
-    .replace(/^\s*(\d+[.)]|[-*+]|\[[ xX]\])\s+/, '')
-    .replace(/^(\d+[.)]|\[[ xX]\])\s+/, '')
-    .trim()
-
-function parsePlan(markdown: string, now: number): Plan | null {
-  let title = ''
-  const headed: PlanStage[] = []
-  const items: { depth: number; text: string; status: StepStatus }[] = []
-  for (const line of markdown.split(/\r?\n/)) {
-    const h = line.match(/^(#{1,4})\s+(.*)$/)
-    if (h) {
-      const text = clean(h[2] ?? '')
-      if (h[1] === '#' && !title) title = text
-      else headed.push({ name: text, steps: [] })
-      continue
-    }
-    const li = line.match(/^(\s*)(\d+[.)]|[-*+])\s+(.*)$/)
-    if (!li) continue
-    const depth = Math.floor((li[1] ?? '').replace(/\t/g, '  ').length / 2)
-    const text = clean(li[3] ?? '').slice(0, 120)
-    if (!text) continue
-    // a ticked box is a step the plan already counts as done
-    const status: StepStatus = /^\[[xX]\]\s/.test(li[3] ?? '') ? 'done' : 'pending'
-    items.push({ depth, text, status })
-    const stage = headed[headed.length - 1]
-    if (!stage) continue
-    const step = stage.steps[stage.steps.length - 1]
-    if (depth === 0 || !step) stage.steps.push({ title: text, status, substeps: [] })
-    else step.substeps.push({ title: text, status })
-  }
-  let stages = headed.filter(s => s.steps.length > 0)
-  if (stages.length === 0) {
-    if (items.some(i => i.depth > 0)) {
-      for (const item of items) {
-        const stage = stages[stages.length - 1]
-        if (item.depth === 0 || !stage) stages.push({ name: item.text, steps: [] })
-        else stage.steps.push({ title: item.text, status: item.status, substeps: [] })
-      }
-      stages = stages.map(s => (s.steps.length ? s : { ...s, steps: [{ title: s.name, status: 'pending', substeps: [] }] }))
-    } else if (items.length > 0) {
-      stages = [{ name: 'Tasks', steps: items.map(i => ({ title: i.text, status: i.status, substeps: [] })) }]
-    }
-  }
-  if (stages.length === 0) return null
-
-  return { id: PLAN_ID, title: title || 'Plan', kind: stages.length === 1 ? 'todo' : 'plan', stages, state: 'running', note: null, startedAt: now }
 }
 
 function st(title: string, s: StepStatus): PlanStep {
@@ -644,11 +590,7 @@ function plural(n: number, word: string) {
 // ---------- engine glue ----------
 
 // the engine's player first (afplay on macOS); PowerShell where it cannot play
-// set while a demo reel records: every sound with its moment, so a video can carry them
-let soundLog: { at: number; name: string }[] | null = null
-
 function play($: EngineInterface, name: 'decision' | 'error' | 'done') {
-  if (soundLog) void $.clock.now().then(at => soundLog?.push({ at, name }))
   const file = `${$.plugin.root}/sounds/${name}.wav`.replace(/\//g, '\\')
   const viaPowerShell = () =>
     $.process
@@ -818,12 +760,6 @@ const CALLS_BEFORE_NUDGE = 6 // edits without a plan update before a reminder
 
 
 
-// ---------- demo reel: two pipelines and their agents, ~13 s, for screen recordings ----------
-const run = (id: string, title: string, tool: string, at: number, isSonnet: boolean): AgentRun => ({
-  id, title, state: 'running', tool, startedAt: at, endedAt: null, depth: 0,
-  ...(isSonnet ? { model: 'claude-sonnet-5-5', effort: 'medium' } : { model: 'claude-haiku-4-5' }),
-})
-
 // $.state lives as long as the process, so the bars are kept per session in the plugin's store as well
 const SAVED = 'plans:'
 const KEEP_SESSIONS = 20
@@ -848,88 +784,6 @@ async function restorePlans($: EngineInterface) {
   const list = (saved as Plan[]).map(p => ({ ...p, agents: [], agentsDoneAt: null }))
   await update($, plans, () => list)
   lastSaved = list
-}
-
-async function runReel($: EngineInterface, logPath: string) {
-  const t0 = await $.clock.now()
-  soundLog = []
-  foldUntil = t0 + 20_000
-  await update($, plans, () => [])
-  const A = 'reel-checkout'
-  const B = 'reel-release'
-  const steps = (names: string[], active: number) => names.map((n, i) => st(n, i < active ? 'done' : i === active ? 'active' : 'pending'))
-  // mid-run the checkout plan is rewritten: a Harden stage lands between Build and Verify
-  let isReplanned = false
-  const planA = (k: number, state: PlanState = 'running'): Plan => {
-    const all = isReplanned
-      ? ['Routes', 'Cart store', 'Payment API', 'Webhooks', 'Checkout UI', 'Rate limits', 'Security review', 'Tests', 'Build']
-      : ['Routes', 'Cart store', 'Payment API', 'Webhooks', 'Checkout UI', 'Tests', 'Build']
-    const s2 = steps(all, k)
-    const stages = isReplanned
-      ? [{ name: 'Explore', steps: s2.slice(0, 2) }, { name: 'Build', steps: s2.slice(2, 5) }, { name: 'Harden', steps: s2.slice(5, 7) }, { name: 'Verify', steps: s2.slice(7) }]
-      : [{ name: 'Explore', steps: s2.slice(0, 2) }, { name: 'Build', steps: s2.slice(2, 5) }, { name: 'Verify', steps: s2.slice(5) }]
-    return { id: A, title: 'Checkout flow', kind: 'plan', state, note: null, startedAt: t0, stages }
-  }
-  const planB = (k: number, state: PlanState = 'running'): Plan =>
-    ({ id: B, title: 'Release notes', kind: 'todo', state, note: null, startedAt: t0, stages: [{ name: 'Release', steps: steps(['Collect PRs', 'Group changes', 'Draft notes', 'Publish'], k) }] })
-  const setAgents = async (id: string, f: (a: AgentRun[]) => AgentRun[]) => {
-    const now = await $.clock.now()
-    await update($, plans, list => list.map(p => (p.id === id ? syncAuto({ ...p, agents: f(p.agents ?? []) }, now) : p)))
-  }
-  const edit = (id: string, agentId: string, ch: Partial<AgentRun>, at: number) =>
-    setAgents(id, list => list.map(a => (a.id === agentId ? { ...a, ...ch, ...(ch.state === 'done' || ch.state === 'error' ? { endedAt: at } : {}) } : a)))
-  const keep = async (id: string, f: (p: Plan) => Plan) => {
-    let before: PlanState | undefined
-    let after: PlanState | undefined
-    const now = await $.clock.now()
-    await update($, plans, list =>
-      list.map(p => {
-        if (p.id !== id) return p
-        before = p.state
-        const made = f(p)
-        // a finished bar shows its time in the pill, so it needs the moment it ended
-        const next = { ...made, endedAt: made.state === 'done' ? now : null, agents: p.agents, agentsDoneAt: p.agentsDoneAt }
-        after = next.state
-        return next
-      }),
-    )
-    if (after) chime($, before, after)
-  }
-
-  // agent events: [ms, bar, agent id, title or change]
-  type Ev = [number, string, string, string | Partial<AgentRun>]
-  const ev: Ev[] = [
-    [0, A, 'a1', 'Map payment routes'], [0, A, 'a2', 'Read cart store'], [0, A, 'a3', 'Scan checkout tests'], [0, A, 'a4', 'Trace tax rules'],
-    [0, A, 'a5', 'List webhooks'], [300, B, 'b1', 'Collect merged PRs'], [300, B, 'b2', 'Group by area'], [300, B, 'b3', 'Find breaking changes'],
-    [300, B, 'b4', 'Check migrations'], [900, A, 'a1', { tool: 'Read' }], [1100, B, 'b1', { tool: 'Bash' }], [1500, A, 'a2', { state: 'done' }],
-    [2000, B, 'b2', { tool: 'Grep' }], [2200, A, 'a4', { tool: 'Grep' }], [2400, B, 'b1', { state: 'done' }],
-    [2800, A, 'a1', { state: 'done' }], [3200, B, 'b3', { tool: 'Read' }],
-    [3500, A, 'a3', { state: 'waiting', tool: 'Needs approval' }], [4100, B, 'b2', { state: 'done' }],
-    [4400, A, 'a5', { state: 'done' }], [4700, B, 'b4', { state: 'done' }], [5000, A, 'a3', { state: 'running', tool: 'Bash' }],
-    [5600, B, 'b5', 'Draft release notes'], [6000, A, 'a3', { state: 'error' }], [6600, B, 'b3', { state: 'done' }], [7000, A, 'a6', 'Fix webhook retry'], [7600, A, 'a4', { state: 'done' }],
-    [8000, B, 'b5', { tool: 'Write' }], [8400, A, 'a6', { tool: 'Bash' }], [9000, B, 'b5', { state: 'done' }], [10200, A, 'a6', { state: 'done' }],
-  ]
-  const script: [number, () => Promise<unknown>][] = [
-    [0, async () => {
-      await putPlan($, planA(0))
-      await putPlan($, planB(0))
-    }],
-    ...ev.map(([at, bar, id, x]): [number, () => Promise<unknown>] => [
-      at,
-      () => (typeof x === 'string' ? setAgents(bar, list => [...list, run(id, x, ['Glob', 'Read', 'Grep'][list.length % 3] ?? 'Read', t0 + at, list.length % 3 === 1)]) : edit(bar, id, x, t0 + at)),
-    ]),
-    [1600, () => keep(A, () => planA(1))], [2500, () => keep(B, () => planB(1))], [3500, () => keep(A, p => ({ ...planA(2), state: 'needs_input', note: 'Run payment tests?' }))],
-    [5000, () => keep(A, () => planA(3))], [5700, () => keep(B, () => planB(2))],
-    [6000, () => keep(A, () => ({ ...planA(5), state: 'error', note: '2 tests failed' }))],
-    [7000, () => keep(A, () => { isReplanned = true; return planA(5) })], [8200, () => keep(B, () => planB(3))],
-    [8800, () => keep(A, () => planA(7))],
-    [9100, () => keep(B, () => planB(4, 'done'))], [10400, () => keep(A, () => planA(9, 'done'))],
-    [13500, async () => {
-      await $.fs.write(logPath, JSON.stringify({ t0, sounds: soundLog }))
-      soundLog = null
-    }],
-  ]
-  for (const [at, step] of script) $.clock.after(at, () => void step())
 }
 
 export const register: Register = on => {
@@ -1040,7 +894,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.tool.register({
       name: 'plan_progress',
-      description: 'Live progress bar above the prompt, one per id. Create with title + stages; update with short ops (next, done, active, failed) or state.',
+      description: RULES,
       inputSchema: {
         type: 'object',
         required: ['id'],
@@ -1081,20 +935,10 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('prompt.compose', async ($, e, next) => {
-    const result = await next(e)
-
-    return { sections: [...result.sections, { id: 'plan-progress:rules', text: RULES, scope: 'session' as const }] }
-  })
-
   on('tool.call', { tool: TOOL }, async ($, e) => {
     const raw = e as unknown as Raw
     const now = await $.clock.now()
     const id = slug(str(raw.id, 60) || str(raw.title, 80))
-    if (id === 'reel' && typeof raw.note === 'string') {
-      await runReel($, raw.note)
-      return { result: 'reel started' }
-    }
     const next = await editPlan($, id, prev => {
       const made = normalize(raw, prev, now, id)
       return typeof made !== 'string' && made.stages.length === 0 ? `plan_progress: no bar "${id}" yet; create it with title and stages.` : made
@@ -1120,21 +964,6 @@ export const register: Register = on => {
     if (live) await update($, plans, list => list.map(p => (p.id === live.id && p.state === 'needs_input' ? { ...p, state: 'running' as const } : p)))
 
     return ran
-  })
-
-  on('tool.call', { tool: 'ExitPlanMode' }, async ($, e, next) => {
-    play($, 'decision')
-    const ran = await next(e)
-    if (ran.deny !== undefined || ran.isError === true) return ran
-    const text = (ran.result as { plan?: unknown } | undefined)?.plan
-    const parsed = typeof text === 'string' ? parsePlan(text, await $.clock.now()) : null
-    if (!parsed) return ran
-    await editPlan($, PLAN_ID, prev =>
-      prev ? { ...parsed, stages: pointAt(carryDone(parsed.stages, prev.stages)), startedAt: prev.startedAt } : { ...parsed, stages: pointAt(parsed.stages) },
-    )
-
-    // the model learns which bar holds its plan, so it moves that one rather than opening its own
-    return { ...ran, context: [...(ran.context ?? []), `plan-progress: bar "${PLAN_ID}" shows this plan; move it with {id:"${PLAN_ID}", next:true} as steps finish.`] }
   })
 
   on('command.run', { command: 'progress' }, async $ => {

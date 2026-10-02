@@ -8,7 +8,7 @@ The real `hooks/register.tsx`, compiled and driven through its hooks with a stub
 cd plugins/plan-progress/tests
 node compile.cjs ../hooks/register.tsx register.mjs
 node regress.mjs          # expected behaviour, must print "all passed"
-node scenarios.mjs        # the 32 audit cases, prints what each one does now
+node scenarios.mjs        # the audit cases, prints what each one does now
 node look.mjs             # writes look.html: the bars as the desktop draws them, for a browser
 ```
 

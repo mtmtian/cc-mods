@@ -1,6 +1,6 @@
 ---
 name: plan-progress
-description: Reference for the plan_progress bars (tool ops, /progress commands). The working rules are already in the system prompt; load only when the user asks about the bars or a call was refused.
+description: Reference for the plan_progress bars (tool ops, /progress commands). The working rules are already in the tool's description; load only when the user asks about the bars or a call was refused.
 ---
 
 # plan_progress
@@ -19,8 +19,6 @@ Ops:
 The plan changed: resend `stages` under the same `id`. Steps sent without a status keep their done by title; send `status:"active"` to redo one. Short ops sent along apply on top.
 
 A title the bar does not have is refused with the bar's step list. A title used twice means the one still open.
-
-A plan approved in plan mode lands on the bar `plan`; move that one.
 
 The result says `done/total, state, active step`; no need to check the bar.
 
