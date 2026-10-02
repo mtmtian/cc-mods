@@ -121,6 +121,20 @@ describe("emphasis: prompts are not maths", () => {
     expect(unstyled("snake__init__case", "bold")).toBe(true)
   })
 
+  test("__tests__/ and __pycache__ in a path are not bold, a __bold__ word still is", () => {
+    for (const text of [
+      "see src/__tests__/a.test.ts",
+      "see __tests__/a.test.ts",
+      "jest/__snapshots__/x.snap",
+      "drop __pycache__ and __mocks__",
+      "x/__bold__ y",
+    ]) {
+      expect(unstyled(text, "bold")).toBe(true)
+    }
+    expect(at("a __bold__ b", "bold")).toMatchObject({ bold: true })
+    expect(at("see __tests__ then __bold__", "bold")).toMatchObject({ bold: true })
+  })
+
   test("but a closing ** may sit against a word: **bold**text", () => {
     expect(at("**bold**text", "bold")).toMatchObject({ bold: true })
   })

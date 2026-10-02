@@ -8,7 +8,7 @@ The repo is also a plugin marketplace, so a forked mod can be installed from her
 
 | Mod | Upstream | Synced at | Local changes | License |
 | --- | --- | --- | --- | --- |
-| [md-prompt](mods/md-prompt) | [nogu66/md-prompt](https://github.com/nogu66/md-prompt) | `e1b52f3` (0.1.1) | none | MIT |
+| [md-prompt](mods/md-prompt) | [nogu66/md-prompt](https://github.com/nogu66/md-prompt) | `e1b52f3` (0.1.1) | `0.1.1-cc.1`: `__tests__/`, `__pycache__` and other dunder paths are not painted bold ([nogu66/md-prompt#4](https://github.com/nogu66/md-prompt/issues/4)) | MIT |
 
 ## Install a mod from this repo
 
@@ -23,7 +23,20 @@ claude plugin marketplace add mtmtian/cc-mods
 claude plugin install md-prompt@cc-mods
 ```
 
+To install from a local checkout instead, so your own edits are what gets installed, pass its path: `claude plugin marketplace add <path to this checkout>`.
+
 Install a mod from one marketplace only. With both `md-prompt@nogu66` and `md-prompt@cc-mods` enabled, the prompt box is painted twice.
+
+## Change a mod
+
+A local change bumps the mod's `version` in its `.claude-plugin/plugin.json` with a `-cc.N` suffix (`0.1.1-cc.1`, `0.1.1-cc.2`, ...), since installed copies only update when the version changes. Then:
+
+```bash
+claude plugin marketplace update cc-mods
+claude plugin update md-prompt@cc-mods
+```
+
+While working on a mod, `--plugin-dir` loads the checkout directly and reloads on save (for md-prompt: `claude --plugin-dir mods/md-prompt/plugins/md-prompt`); each mod's own README has its test commands.
 
 ## Pull upstream changes
 
