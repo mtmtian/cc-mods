@@ -6,9 +6,9 @@ The repo is also a plugin marketplace, so a forked mod can be installed from her
 
 ## Mods
 
-| Mod | Upstream | Synced at | Local changes | License |
-| --- | --- | --- | --- | --- |
-| [md-prompt](mods/md-prompt) | [nogu66/md-prompt](https://github.com/nogu66/md-prompt) | `e1b52f3` (0.1.1) | `0.1.1-cc.1`: `__tests__/`, `__pycache__` and other dunder paths are not painted bold ([nogu66/md-prompt#4](https://github.com/nogu66/md-prompt/issues/4)) | MIT |
+| Mod | Upstream | Local changes | License |
+| --- | --- | --- | --- |
+| [md-prompt](mods/md-prompt) | [nogu66/md-prompt](https://github.com/nogu66/md-prompt) | `0.1.1-cc.1`: `__tests__/`, `__pycache__` and other dunder paths are not painted bold ([nogu66/md-prompt#4](https://github.com/nogu66/md-prompt/issues/4)) | MIT |
 
 ## Install a mod from this repo
 
@@ -38,13 +38,19 @@ claude plugin update md-prompt@cc-mods
 
 While working on a mod, `--plugin-dir` loads the checkout directly and reloads on save (for md-prompt: `claude --plugin-dir mods/md-prompt/plugins/md-prompt`); each mod's own README has its test commands.
 
-## Pull upstream changes
+## Check and pull upstream changes
+
+[`upstreams.tsv`](upstreams.tsv) lists each mod's upstream URL and branch. `scripts/upstream-status.sh` reads it and, per mod, prints the upstream commit last synced, the upstream commits since, the paths changed here, and the paths changed on both sides (`overlap_path=`, where a pull may conflict). It only fetches; it never pulls or edits a mod. `scripts/test-upstream-status.sh` checks it against a throwaway upstream.
 
 ```bash
-git subtree pull --prefix=mods/md-prompt https://github.com/nogu66/md-prompt.git main --squash
+bash scripts/upstream-status.sh
 ```
 
-Then update the "Synced at" column above.
+To take the upstream changes, with the URL and branch from `upstreams.tsv`:
+
+```bash
+git subtree pull --prefix=mods/<name> <url> <branch> --squash
+```
 
 ## Add another mod
 
@@ -52,7 +58,7 @@ Then update the "Synced at" column above.
 git subtree add --prefix=mods/<name> https://github.com/<owner>/<repo>.git <branch> --squash
 ```
 
-Then add a row to the table above and an entry to `.claude-plugin/marketplace.json` whose `source` points at the directory holding that mod's `.claude-plugin/plugin.json`.
+Then add the mod to `upstreams.tsv`, a row to the table above, and an entry to `.claude-plugin/marketplace.json` whose `source` points at the directory holding that mod's `.claude-plugin/plugin.json`.
 
 ## Notes
 

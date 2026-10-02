@@ -1,0 +1,2 @@
+# One line per mod under mods/<name>: name, upstream git URL, upstream branch (tab-separated).
+md-prompt	https://github.com/nogu66/md-prompt.git	main
