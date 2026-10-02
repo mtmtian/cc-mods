@@ -172,8 +172,30 @@ const C = {
     const strips = (await E.svgs()).filter(v => String(v.key ?? '').startsWith('strip-t-')).map(v => v.source).join('')
     const light = strips.match(/@media \(prefers-color-scheme:light\)\{(.*?)\}\}/)?.[1] ?? ''
     const inline = /<text[^>]*style="fill:/.test(strips)
-    const ok = strips.includes('Scan tests') && light.includes('.sn{fill:#1F1E1D}') && /\.sn\.w\d\{fill:/.test(light) && !inline
+    const ok = strips.includes('Scan tests') && light.includes('.sn{fill:#141413}') && /\.sn\.w\d\{fill:/.test(light) && !inline
     return [`light rule ${light.slice(0, 40)}…, inline text fill ${inline}`, ok]
+  },
+  // cc-mods: colours come from the desktop app's tokens: white on every state's pill reads at 4.5:1, running is the
+  // brand clay, and no cool grey (#808080) is left in what the band draws
+  async cc_palette_follows_desktop(E) {
+    const lum = h => {
+      const [r, g, b] = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+    const onWhite = h => 1.05 / (lum(h) + 0.05)
+    const pills = {}
+    for (const [id, state] of [['r', 'running'], ['n', 'needs_input'], ['e', 'error'], ['d', 'done']]) {
+      await create(E, id, three(), `Bar ${id}`)
+      if (state !== 'running') await E.call({ id, state })
+      const track = (await E.view(id)).track
+      pills[state] = track.match(/<rect x="-[\d.]+" y="0" width="[\d.]+" height="22" rx="11" fill="(#[0-9A-F]{6})"/)?.[1]
+      await E.call({ id, state: 'done' })
+    }
+    await E.spawn('ag1', 'Scan')
+    const all = (await E.svgs()).map(v => v.source).join('')
+    const worst = Math.min(...Object.values(pills).map(h => (h ? onWhite(h) : 0)))
+    const ok = pills.running === '#B55C3E' && worst >= 4.5 && !all.includes('#808080')
+    return [`pills ${JSON.stringify(pills)}, worst white ${worst.toFixed(2)}:1, cool grey ${all.includes('#808080')}`, ok]
   },
   // cc-mods: the demo-reel entry is gone; "reel" with a note is an ordinary id, refused until it has stages
   async cc_reel_entry_gone(E) {

@@ -22,9 +22,11 @@ const HEAD_TWINKLE = 48 // px behind the head of a running bar that still twinkl
 const TOGGLE_W = 32 // px the agents button (▾ 4 / ▴) takes after a title; reserved on every desktop row, so a button
 // appearing with a second agent never narrows the tracks under the person's eyes
 
-// one lightness for every state (OKLCH L .55, hues of the desktop's violet, amber, red and green), so no state
-// shouts louder than another, and white on each reads at 4.5:1 or better
-const STATE_COLOR: Record<PlanState, string> = { running: '#7858CA', needs_input: '#AD6400', error: '#C5353E', done: '#18883A' }
+// the desktop app's own tokens, so the band reads as part of it: running in the brand clay (--accent-brand), waiting on
+// the person in its accent blue (--accent-100), error and done in its danger and success (light theme's -100).
+// The pill is a shade deeper where it must be, so white on every pill reads at 4.5:1 or better
+const STATE_COLOR: Record<PlanState, string> = { running: '#D97757', needs_input: '#2C84DB', error: '#B53333', done: '#2F7613' }
+const PILL_COLOR: Record<PlanState, string> = { running: '#B55C3E', needs_input: '#1B67B2', error: '#B53333', done: '#2F7613' }
 const INK = '#FFFFFF'
 const STATE_GLYPH: Record<PlanState, string> = { running: '●', needs_input: '?', error: '!', done: '✓' }
 const STATUSES: StepStatus[] = ['pending', 'active', 'done', 'error', 'skipped']
@@ -298,7 +300,7 @@ function drawTrack(p: Plan, W: number): Track {
 
   const acc = hex(STATE_COLOR[p.state])
   const light = mix(acc, [255, 255, 255], 0.32)
-  const grey = [132, 130, 138]
+  const grey = [140, 138, 130]
   const ease = 'calcMode="spline" keyTimes="0;1" keySplines=".2 .8 .2 1"'
   const glide = Math.abs(from - fx) > 0.5
 
@@ -366,7 +368,7 @@ function drawTrack(p: Plan, W: number): Track {
 
   // knob: a pill with stage and count, or a round dot with the stage number when narrow
   const isNarrow = W < NARROW
-  const color = STATE_COLOR[p.state]
+  const color = PILL_COLOR[p.state]
   const icon = ICON_PATH[p.state]
   const single = p.stages.length === 1
   const number = single ? w.step : w.stage + 1
@@ -421,7 +423,7 @@ function drawTrack(p: Plan, W: number): Track {
 </style>`
   const hoverStyle = `<style>
 .tp{opacity:0;transition:opacity .12s;pointer-events:none}${tipRules.length ? `${tipRules.join(',')}{opacity:1}` : ''}
-.tt{font:400 11px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#F0EEFC}
+.tt{font:400 11px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#FAF9F5}
 .kt{font:500 12px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:${INK}}
 .kv{opacity:0;filter:blur(3px);transition:opacity .2s,filter .2s}.kb:hover .kv{opacity:1;filter:none}
 .kb,rect[class^="h"]{cursor:pointer}
@@ -434,7 +436,7 @@ ${CLOCK_CSS}
   const base = `${open}${style}
 <defs><clipPath id="pill"><rect width="${W}" height="${H}" rx="${H / 2}"/></clipPath><clipPath id="fill"><rect width="${fx.toFixed(1)}" height="${H}">${glideFill}</rect></clipPath>
 <linearGradient id="base" x1="0" x2="${fx.toFixed(1)}" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${rgb(acc)}" stop-opacity=".05"/><stop offset="1" stop-color="${rgb(acc)}" stop-opacity=".33"/></linearGradient></defs>
-<g clip-path="url(#pill)"><rect width="${W}" height="${H}" fill="#808080" fill-opacity=".16"/>
+<g clip-path="url(#pill)"><rect width="${W}" height="${H}" fill="#8C8A82" fill-opacity=".16"/>
 <g clip-path="url(#fill)"><rect width="${fx.toFixed(1)}" height="${H}" fill="url(#base)"/>${px}</g>${marks}</g>
 <g transform="translate(${kx.toFixed(1)} 0)">${glideKnob}${knob}</g></svg>`
   // the hover layer: checkpoint areas under the pill's copy, so the pill wins where they meet; tips on top
@@ -452,7 +454,7 @@ const AGENT_COLOR: Record<AgentRun['state'], string> = {
 
 // strip text follows the theme: the drawing is an image on a see-through band, and near-white text on a light
 // band reads at 1.1:1. The tool word sits on its own state's tint, where the bare state colour reads at about 3:1;
-// lifted towards the far end of the theme (45% white on dark, 20% black on light) it clears 4.5:1 on either
+// lifted towards the far end of the theme (45% white on dark, 35% black on light) it clears 4.5:1 on either
 const WORD_CLASS: Record<string, string> = Object.fromEntries(Object.values(AGENT_COLOR).map((c, i) => [c, `w${i}`]))
 const wordCss = (to: number[], m: number) => Object.entries(WORD_CLASS).map(([c, cls]) => `.sn.${cls}{fill:${rgb(mix(hex(c), to, m))}}`).join('')
 
@@ -601,7 +603,7 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
       height: y + STRIP_H,
       html:
         gutter(y, v.shown.length === 0 ? String(v.hidden.length) : `+${v.hidden.length}`, true) +
-        `<rect x="${GUTTER}" y="${y}" width="${SW}" height="${STRIP_H}" rx="${STRIP_H / 2}" fill="#808080" fill-opacity=".14"/>` +
+        `<rect x="${GUTTER}" y="${y}" width="${SW}" height="${STRIP_H}" rx="${STRIP_H / 2}" fill="#8C8A82" fill-opacity=".14"/>` +
         (isLive ? `<circle cx="${GUTTER + 10}" cy="${y + STRIP_H / 2}" r="3" fill="${AGENT_COLOR.running}" class="sd"/>` : '') +
         `<text x="${GUTTER + (isLive ? 19 : 10)}" y="${y + 11.5}" class="sn st">${label} · ${tally(v.hidden)}</text>`,
     })
@@ -609,9 +611,9 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
   return rows
 }
 
-const STRIP_STYLE = `<style>.sn{font:400 11.5px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#F0EEFC}.st{fill-opacity:.65}.sg{font-weight:500;font-variant-numeric:tabular-nums}
-.gi{stroke:#A8A69E}.sn.gl{fill:#A8A69E}.gi.gm{stroke:#8A8984}.sn.gl.gm{fill:#8A8984}${wordCss([255, 255, 255], 0.45)}
-@media (prefers-color-scheme:light){.sn{fill:#1F1E1D}.gi,.gi.gm{stroke:#6F6D66}.sn.gl,.sn.gl.gm{fill:#6F6D66}${wordCss([0, 0, 0], 0.2)}}
+const STRIP_STYLE = `<style>.sn{font:400 11.5px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#FAF9F5}.st{fill-opacity:.65}.sg{font-weight:500;font-variant-numeric:tabular-nums}
+.gi{stroke:#9C9A92}.sn.gl{fill:#9C9A92}.gi.gm{stroke:#8C8A82}.sn.gl.gm{fill:#8C8A82}${wordCss([255, 255, 255], 0.45)}
+@media (prefers-color-scheme:light){.sn{fill:#141413}.gi,.gi.gm{stroke:#73726C}.sn.gl,.sn.gl.gm{fill:#73726C}${wordCss([0, 0, 0], 0.35)}}
 .sd{animation:sp 1.1s ease-in-out infinite}@keyframes sp{50%{opacity:.3}}
 .mi{animation:mi ${MORPH} ease-out both}@keyframes mi{from{opacity:0;filter:blur(3px)}}
 .mo{animation:mo ${MORPH} ease-in both}@keyframes mo{to{opacity:0;filter:blur(3px)}}
@@ -1079,7 +1081,7 @@ export const register: Register = on => {
     const trackW = Math.max(120, Math.min(1400, total - titleWidth - 140 - (Svg !== null ? TOGGLE_W : 0)))
     const toggle = (id: string) => update($, expanded, ids => (ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]))
     // a hairline between task bars, so each bar and its agent strips read as one group
-    const divider = `<svg xmlns="http://www.w3.org/2000/svg" width="${total}" height="1"><rect width="${total}" height="1" fill="#808080" fill-opacity=".22"/></svg>`
+    const divider = `<svg xmlns="http://www.w3.org/2000/svg" width="${total}" height="1"><rect width="${total}" height="1" fill="#8C8A82" fill-opacity=".22"/></svg>`
 
     return (
       <Box flexDirection="column" gap={1}>
