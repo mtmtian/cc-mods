@@ -9,7 +9,7 @@ The repo is also a plugin marketplace, so a forked mod can be installed from her
 | Mod | Upstream | Local changes | License |
 | --- | --- | --- | --- |
 | [md-prompt](mods/md-prompt) | [nogu66/md-prompt](https://github.com/nogu66/md-prompt) | `0.1.1-cc.1`: `__tests__/`, `__pycache__` and other dunder paths are not painted bold ([nogu66/md-prompt#4](https://github.com/nogu66/md-prompt/issues/4)) | MIT |
-| [plan-progress](mods/plan-progress) | [zycck/claude-mods](https://github.com/zycck/claude-mods) | `0.5.0-cc.1`: the usage rules ride in the tool description instead of `prompt.compose`, which the desktop app's engine (2.1.284) does not have; plan-mode import removed; the hidden demo-reel entry that wrote a file to a model-given path removed | MIT |
+| [plan-progress](mods/plan-progress) | [zycck/claude-mods](https://github.com/zycck/claude-mods) | `0.5.0-cc.1`: the usage rules ride in the tool description instead of `prompt.compose`, which the desktop app's engine (2.1.284) does not have; plan-mode import removed; the hidden demo-reel entry that wrote a file to a model-given path removed; agent strip text follows the light/dark theme (it was near-white on the light theme, 1.1:1) and the tool word reads at 4.5:1 or better on both | MIT |
 
 ## Install a mod from this repo
 

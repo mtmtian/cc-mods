@@ -164,6 +164,17 @@ const C = {
     const r = await E.exitPlan({ result: { plan: '# Fix login\n## A\n- One\n## B\n- Two' } })
     return [`${E.plans().length} bars, context ${JSON.stringify(r.context ?? null)}`, E.plans().length === 0 && r.context === undefined]
   },
+  // cc-mods: strip text takes its colour from the theme; a fill written on the text itself would beat the light rule
+  async cc_strip_text_follows_theme(E) {
+    await create(E)
+    await E.spawn('ag1', 'Scan tests')
+    await E.agentTool('ag1', 'Grep')
+    const strips = (await E.svgs()).filter(v => String(v.key ?? '').startsWith('strip-t-')).map(v => v.source).join('')
+    const light = strips.match(/@media \(prefers-color-scheme:light\)\{(.*?)\}\}/)?.[1] ?? ''
+    const inline = /<text[^>]*style="fill:/.test(strips)
+    const ok = strips.includes('Scan tests') && light.includes('.sn{fill:#1F1E1D}') && /\.sn\.w\d\{fill:/.test(light) && !inline
+    return [`light rule ${light.slice(0, 40)}…, inline text fill ${inline}`, ok]
+  },
   // cc-mods: the demo-reel entry is gone; "reel" with a note is an ordinary id, refused until it has stages
   async cc_reel_entry_gone(E) {
     const r = await E.call({ id: 'reel', note: '/tmp/plan-progress-reel.json' })

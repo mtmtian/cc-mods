@@ -442,6 +442,12 @@ const AGENT_COLOR: Record<AgentRun['state'], string> = {
   error: STATE_COLOR.error,
 }
 
+// strip text follows the theme: the drawing is an image on a see-through band, and near-white text on a light
+// band reads at 1.1:1. The tool word sits on its own state's tint, where the bare state colour reads at about 3:1;
+// lifted towards the far end of the theme (45% white on dark, 20% black on light) it clears 4.5:1 on either
+const WORD_CLASS: Record<string, string> = Object.fromEntries(Object.values(AGENT_COLOR).map((c, i) => [c, `w${i}`]))
+const wordCss = (to: number[], m: number) => Object.entries(WORD_CLASS).map(([c, cls]) => `.sn.${cls}{fill:${rgb(mix(hex(c), to, m))}}`).join('')
+
 // the desktop drops an Svg whose alt is empty, so every drawing says what it shows
 function stripAlt(p: Plan, key: string): string {
   const a = (p.agents ?? []).find(x => x.id === key)
@@ -503,9 +509,9 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
   const isNarrow = W < NARROW
   const SW = W - GUTTER
   const rows: StripRow[] = []
-  const gutter = (y: number, label: string, color: string) =>
-    `<g transform="translate(1 ${y + 2}) scale(.5)" fill="none" stroke="${color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">${BOT}</g>` +
-    `<text x="16" y="${y + 11.5}" class="sn sg" style="fill:${color}">${label}</text>`
+  const gutter = (y: number, label: string, isDim = false) =>
+    `<g transform="translate(1 ${y + 2}) scale(.5)" fill="none" class="gi${isDim ? ' gm' : ''}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">${BOT}</g>` +
+    `<text x="16" y="${y + 11.5}" class="sn sg gl${isDim ? ' gm' : ''}">${label}</text>`
   v.shown.forEach((a, i) => {
     // the first strip keeps a little room from the track above it
     const y = i === 0 ? 5 : STRIP_GAP
@@ -547,11 +553,11 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
     const flow = (attr: string) => (was && was.color !== c ? `<animate attributeName="${attr}" from="${was.color}" to="${c}" dur="${MORPH}" fill="freeze"/>` : '')
     const tool = isNarrow
       ? ''
-      : (isWordChanged && was.tool ? `<text x="${toolX}" y="${y + 11.5}" class="sn mo" style="fill:${was.color}">${esc(was.tool)}</text>` : '') +
-        (word ? `<text x="${toolX}" y="${y + 11.5}" class="sn${isWordChanged ? ' mi' : ''}" style="fill:${c}">${esc(word)}</text>` : '') +
+      : (isWordChanged && was.tool ? `<text x="${toolX}" y="${y + 11.5}" class="sn mo ${WORD_CLASS[was.color] ?? ''}">${esc(was.tool)}</text>` : '') +
+        (word ? `<text x="${toolX}" y="${y + 11.5}" class="sn${isWordChanged ? ' mi' : ''} ${WORD_CLASS[c] ?? ''}">${esc(word)}</text>` : '') +
         time
     const html =
-      gutter(y, String(all.indexOf(a) + 1), '#A8A69E') +
+      gutter(y, String(all.indexOf(a) + 1)) +
       `<rect x="${GUTTER}" y="${y}" width="${SW}" height="${STRIP_H}" rx="${STRIP_H / 2}" fill="${c}" fill-opacity=".15">${flow('fill')}</rect>${px}` +
       `<circle cx="${GUTTER + 10 + indent}" cy="${y + STRIP_H / 2}" r="3" fill="${c}"${a.state === 'running' ? ' class="sd"' : ''}>${flow('fill')}</circle>` +
       `<text x="${nameX}" y="${y + 11.5}" class="sn">${nameMarkup(name)}</text>` +
@@ -566,7 +572,7 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
       key: '+',
       height: y + STRIP_H,
       html:
-        gutter(y, `+${v.hidden.length}`, '#8A8984') +
+        gutter(y, `+${v.hidden.length}`, true) +
         `<rect x="${GUTTER}" y="${y}" width="${SW}" height="${STRIP_H}" rx="${STRIP_H / 2}" fill="#808080" fill-opacity=".14"/>` +
         `<text x="${GUTTER + 10}" y="${y + 11.5}" class="sn st">${plural(v.hidden.length, 'more agent')} · ${doneCount} done</text>`,
     })
@@ -575,6 +581,8 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
 }
 
 const STRIP_STYLE = `<style>.sn{font:400 11.5px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#F0EEFC}.st{fill-opacity:.65}.sg{font-weight:500;font-variant-numeric:tabular-nums}
+.gi{stroke:#A8A69E}.sn.gl{fill:#A8A69E}.gi.gm{stroke:#8A8984}.sn.gl.gm{fill:#8A8984}${wordCss([255, 255, 255], 0.45)}
+@media (prefers-color-scheme:light){.sn{fill:#1F1E1D}.gi,.gi.gm{stroke:#6F6D66}.sn.gl,.sn.gl.gm{fill:#6F6D66}${wordCss([0, 0, 0], 0.2)}}
 .sd{animation:sp 1.1s ease-in-out infinite}@keyframes sp{50%{opacity:.3}}
 .mi{animation:mi ${MORPH} ease-out both}@keyframes mi{from{opacity:0;filter:blur(3px)}}
 .mo{animation:mo ${MORPH} ease-in both}@keyframes mo{to{opacity:0;filter:blur(3px)}}
