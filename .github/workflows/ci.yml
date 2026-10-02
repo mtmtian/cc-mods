@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Function hooks are early access and may change between Claude Code
+  # releases: a weekly run against the latest one catches a release that
+  # breaks the plugin before someone installing it does.
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plugin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: '1'
+    steps:
+      # Pinned to commit SHAs, since a tag can be moved to other code after the
+      # fact; Dependabot (.github/dependabot.yml) proposes the bumps.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      # latest, not stable: function hooks need 2.1.280+, which the stable
+      # dist-tag can trail.
+      - run: npm install -g @anthropic-ai/claude-code@latest typescript
+      - run: claude --version
+      - name: Test the pure logic
+        run: bun test tests
+      - name: Test the hooks
+        run: claude plugin test plugins/md-prompt
+      - name: Validate the marketplace
+        run: claude plugin validate .
+      - name: Validate the plugin
+        run: claude plugin validate plugins/md-prompt
+      # Loading the plugin in a session is what writes the type declarations of this Claude Code
+      # build and a tsconfig.json next to it (validate and test do not). /cost is a local command:
+      # no model call, and it runs without a login.
+      - name: Write the type declarations
+        run: claude -p "/cost" --plugin-dir plugins/md-prompt
+      - name: Type-check the plugin
+        run: tsc -p plugins/md-prompt
