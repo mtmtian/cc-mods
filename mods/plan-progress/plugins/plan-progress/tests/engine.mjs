@@ -94,6 +94,24 @@ export async function boot(file, kept = new Map()) {
       walk(tree)
       return found
     },
+    // the Buttons of the real AbovePrompt render, and a press on one by its key, as a click would
+    buttons: async () => {
+      const tree = await dispatch('ui.render', { component: 'AbovePrompt', surface: 'desktop', props: { bodyColumns: 140, hasSurvey: false } }, () => null)
+      const found = []
+      const walk = n => {
+        if (Array.isArray(n)) return n.forEach(walk)
+        if (!n || typeof n !== 'object') return
+        if (n.type === 'Button') found.push(n.props)
+        ;(n.children ?? []).forEach(walk)
+      }
+      walk(tree)
+      return found
+    },
+    press: async key => {
+      const hit = (await api.buttons()).find(b => b.key === key)
+      if (!hit) throw new Error(`no button ${key}`)
+      await hit.onPress({ surface: 'desktop' })
+    },
     view: async id => {
       const tree = await dispatch('ui.render', { component: 'AbovePrompt', surface: 'desktop', props: { bodyColumns: 140, hasSurvey: false } }, () => null)
       const found = []

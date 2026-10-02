@@ -39,6 +39,8 @@ declare module 'claude-code' {
       isOpen: boolean
       // bumped every second while agents run, so elapsed times and folding redraw
       tick: number
+      // bars whose agent strips are opened out (cc-mods: strips fold by default)
+      expanded: string[]
     }
   }
 }

@@ -11,9 +11,9 @@ Live progress bars above the Claude Code prompt. Claude breaks medium and large 
 - One thin row per task: state, title, pixel bar, percent, close button
 - A pill on the bar shows the current stage and step count; hover it to see how long the plan has run
 - Stage boundaries are capsules, steps are dots; hover a checkpoint to see when it was reached
-- A finished bar turns green and its pill shows a check and the time the task took
+- A finished bar turns green and its pill shows a check and the time the task took, then leaves on its own a minute later; a failed bar stays until closed
 - Four states in one brightness, white text readable on each: running (violet), needs input (amber), error (red), done (green)
-- Subagents appear as strips under the task that started them: name, model and effort (`haiku 4.5`, `sonnet 5.5 · medium`), the tool in use, a live clock; a status change morphs in 200 ms and finished strips fold after 5 seconds
+- Subagents appear as strips under the task that started them: name, model and effort (`haiku 4.5`, `sonnet 5.5 · medium`), the tool in use, a live clock; a status change morphs in 200 ms and finished strips fold after 5 seconds. A waiting or failed agent keeps its strip; the others share one summary row until the ▾ button opens them out
 - The plan can be rewritten mid-run: resent stages keep finished steps by title, and the percent follows
 - Bars survive closing the app: each session's bars are saved and come back when the session is resumed
 - Soft sounds when Claude needs a decision, hits an error or finishes

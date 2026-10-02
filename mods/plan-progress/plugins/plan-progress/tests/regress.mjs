@@ -225,6 +225,8 @@ const C = {
     await create(E)
     await E.spawn('ag1', 'Scan tests')
     await E.spawn('ag2', 'Read docs')
+    // cc-mods: two running agents fold into one summary row; opened out, each has its own strip again
+    await E.press('agents-t')
     const a = await E.view('t')
     await E.agentTool('ag1', 'Grep')
     const b = await E.view('t')
@@ -251,11 +253,68 @@ const C = {
     const ok = !!bar && second.steps('t') === first.steps('t') && (bar.agents ?? []).length === 0
     return [`restored ${!!bar}, same steps ${bar ? second.steps('t') === first.steps('t') : false}, strips dropped ${bar ? (bar.agents ?? []).length === 0 : false}`, ok]
   },
-  async done_bar_twinkles_like_running(E) {
+  // cc-mods: a finished bar holds still (upstream twinkled it like a running one)
+  async cc_done_bar_is_still(E) {
     await create(E)
     await E.call({ id: 't', state: 'done' })
     const src = (await E.view('t')).track
-    return [`twinkle ${/class="b\d t\d"/.test(src)}`, /class="b\d t\d"/.test(src)]
+    return [`twinkle ${/class="b\d t\d"/.test(src)}, dots ${/class="b\d"/.test(src)}`, !/class="b\d t\d"/.test(src) && /class="b\d"/.test(src)]
+  },
+  // cc-mods: a running bar twinkles only in the last stretch behind its head
+  async cc_running_bar_twinkles_only_at_head(E) {
+    await create(E)
+    await E.call({ id: 't', next: true })
+    const src = (await E.view('t')).track
+    const fx = Number(src.match(/<clipPath id="fill"><rect width="([\d.]+)"/)?.[1])
+    const xs = [...src.matchAll(/<path class="b\d t\d" d="([^"]*)"/g)].flatMap(m => [...m[1].matchAll(/M([\d.]+) /g)].map(x => Number(x[1])))
+    const still = /<path class="b\d" d=/.test(src)
+    const nearHead = xs.length > 0 && xs.every(x => x >= fx - 48 - 3)
+    return [`fill ${fx}px, ${xs.length} twinkling dots from x=${Math.min(...xs)}, still dots ${still}`, nearHead && still]
+  },
+  // cc-mods: strips fold by default; a waiting or failed agent keeps its strip, the rest share one summary row
+  async cc_strips_fold_by_default(E) {
+    await create(E)
+    await E.spawn('ag1', 'Lone agent')
+    const lone = await E.view('t')
+    const loneOk = lone.strips.length === 1 && lone.strips[0].includes('Lone agent') && !(await E.buttons()).some(b => b.key === 'agents-t')
+    for (const id of ['ag2', 'ag3', 'ag4']) await E.spawn(id, `Agent ${id}`)
+    await E.turnComplete('ag2', 'error')
+    const folded = await E.view('t')
+    const btn = (await E.buttons()).find(b => b.key === 'agents-t')
+    const foldedOk = folded.strips.length === 2 && folded.strips[0].includes('Agent ag2') && folded.strips[1].includes('3 more agents · 3 running') && btn?.label === '▾ 4'
+    await E.press('agents-t')
+    const open = await E.view('t')
+    const openOk = open.strips.length === 4 && (await E.buttons()).find(b => b.key === 'agents-t')?.label === '▴'
+    await E.press('agents-t')
+    const back = (await E.view('t')).strips.length === 2
+    return [`lone ${loneOk}, folded ${folded.strips.length} rows (${btn?.label}), opened ${open.strips.length}, folded again ${back}`, loneOk && foldedOk && openOk && back]
+  },
+  // cc-mods: the agents button appearing with a second agent leaves the track width alone
+  async cc_track_width_steady_when_button_appears(E) {
+    await create(E)
+    await E.spawn('ag1', 'One')
+    const a = (await E.svgs()).find(v => v.alt.startsWith('Task:'))?.width
+    await E.spawn('ag2', 'Two')
+    const hasButton = (await E.buttons()).some(b => b.key === 'agents-t')
+    const b = (await E.svgs()).find(v => v.alt.startsWith('Task:'))?.width
+    return [`width ${a} → ${b}, button ${hasButton}`, a === b && hasButton]
+  },
+  // cc-mods: a finished bar leaves on its own after a minute; a failed one stays for the person to read
+  async cc_done_bar_leaves_after_linger(E) {
+    await create(E)
+    await create(E, 'bad', [S('X', st('Y', 'active'))], 'Broken')
+    await E.call({ id: 't', state: 'done' })
+    await E.call({ id: 'bad', failed: 'Y', note: 'tests failed' })
+    E.tick(59_000)
+    await E.everyTick()
+    const early = E.plans().map(p => p.id).join(',')
+    E.tick(2_000)
+    await E.everyTick()
+    const late = E.plans().map(p => p.id).join(',')
+    E.tick(120_000)
+    await E.everyTick()
+    const later = E.plans().map(p => p.id).join(',')
+    return [`59s: ${early}; 61s: ${late}; 3m: ${later}`, early === 't,bad' && late === 'bad' && later === 'bad']
   },
   async pill_covers_checkpoints(E) {
     await create(E)

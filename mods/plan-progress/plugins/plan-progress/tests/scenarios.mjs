@@ -100,6 +100,8 @@ const T = {
     await E.call({ id: 't', next: true })
     await E.agentTool('ag1', 'Read')
     await E.spawn('ag2', 'Second agent')
+    // cc-mods: two running agents fold into one summary row by default; open them out to see each strip
+    await E.press('agents-t')
     const src = (await E.view('t')).source
     return { observed: `ag1 back ${src.includes('Scan tests')}, ag2 shown ${src.includes('Second agent')}`, holds: !src.includes('Scan tests') }
   },

@@ -10,11 +10,17 @@ const MAX_BARS = 3
 const FIGURE_SPACE = String.fromCharCode(0x2007)
 const isOpen = atom({ plugin: 'plan-progress', key: 'isOpen' } as const, true)
 const tick = atom({ plugin: 'plan-progress', key: 'tick' } as const, 0)
+// bars whose agent strips are opened out; the rest show waiting and failed agents and one summary row
+const expanded = atom({ plugin: 'plan-progress', key: 'expanded' } as const, [] as string[])
 const STRIP_H = 16
 const STRIP_GAP = 2
 // rows of strips per bar, the "+N more" row included: the band above the prompt has room for about 300 px
 const stripBudget = (bars: number) => (bars >= 3 ? 3 : bars === 2 ? 4 : 5)
 const FOLD_MS = 5000 // finished strips stay this long, failed ones stay until the bar closes
+const DONE_LINGER_MS = 60_000 // a finished bar goes away on its own after this; a failed one waits for its ✕
+const HEAD_TWINKLE = 48 // px behind the head of a running bar that still twinkle; the rest of the fill holds still
+const TOGGLE_W = 32 // px the agents button (▾ 4 / ▴) takes after a title; reserved on every desktop row, so a button
+// appearing with a second agent never narrows the tracks under the person's eyes
 
 // one lightness for every state (OKLCH L .55, hues of the desktop's violet, amber, red and green), so no state
 // shouts louder than another, and white on each reads at 4.5:1 or better
@@ -303,7 +309,8 @@ function drawTrack(p: Plan, W: number): Track {
     if (i < p.stages.length - 1) bounds.push((acc2 / w.total) * W)
   })
 
-  // pixels: 3px grid, 7 rows, denser towards the head, twinkling and warming from grey to the state colour
+  // pixels: 3px grid, 7 rows, denser towards the head, warming from grey to the state colour. The band sits right over
+  // the prompt, so only a running bar twinkles, and only its last HEAD_TWINKLE px; a finished or paused one is still
   const buckets = [0, 1, 2, 3, 4].map(b => {
     const m = b / 4
     const dense = 0.22 + 0.78 * Math.pow(m, 1.5)
@@ -317,7 +324,8 @@ function drawTrack(p: Plan, W: number): Track {
     const bucket = Math.min(4, Math.floor(Math.min(1, Math.pow(u, 0.9) * 1.1) * 4.99))
     for (let r = 0; r < 7; r++) {
       if (hash(col, r, 1) > dense + 0.1) continue
-      addDot(dots, `b${bucket} t${Math.floor(hash(col, r, 2) * 4)}`, x, 1 + r * 3)
+      const isLive = p.state === 'running' && fx - x <= HEAD_TWINKLE
+      addDot(dots, isLive ? `b${bucket} t${Math.floor(hash(col, r, 2) * 4)}` : `b${bucket}`, x, 1 + r * 3)
     }
   }
   const px = [...dots].map(([cls, d]) => `<path class="${cls}" d="${d}"/>`).join('')
@@ -449,9 +457,18 @@ const WORD_CLASS: Record<string, string> = Object.fromEntries(Object.values(AGEN
 const wordCss = (to: number[], m: number) => Object.entries(WORD_CLASS).map(([c, cls]) => `.sn.${cls}{fill:${rgb(mix(hex(c), to, m))}}`).join('')
 
 // the desktop drops an Svg whose alt is empty, so every drawing says what it shows
-function stripAlt(p: Plan, key: string): string {
+function stripAlt(p: Plan, key: string, hidden: AgentRun[]): string {
   const a = (p.agents ?? []).find(x => x.id === key)
-  return a ? `agent ${a.title}: ${a.state}, ${a.tool}` : 'more agents'
+  return a ? `agent ${a.title}: ${a.state}, ${a.tool}` : `agents: ${tally(hidden)}`
+}
+
+// "3 running · 1 done": the agents a summary row stands for, by state, in a fixed order
+const TALLY: [AgentRun['state'], string][] = [['running', 'running'], ['waiting', 'waiting'], ['error', 'failed'], ['done', 'done']]
+function tally(list: AgentRun[]): string {
+  return TALLY.map(([state, word]) => [list.filter(a => a.state === state).length, word] as const)
+    .filter(([n]) => n > 0)
+    .map(([n, word]) => `${n} ${word}`)
+    .join(' · ')
 }
 
 const elapsed = (ms: number) => {
@@ -460,12 +477,20 @@ const elapsed = (ms: number) => {
   return sec < 3600 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`
 }
 
-// which strips show: all of a small batch; in a big one the unfinished first, the rest folded into one line
-function visibleAgents(p: Plan, now: number, max: number): { shown: AgentRun[]; hidden: AgentRun[] } | null {
+// which strips show. Folded (the default) keeps a strip for each agent that needs the person (waiting) or failed,
+// and one summary row for the rest; a lone other agent keeps its own strip, as tall as the summary would be.
+// Opened out: all of a small batch; in a big one the unfinished first, the rest folded into one line
+function visibleAgents(p: Plan, now: number, max: number, isExpanded: boolean): { shown: AgentRun[]; hidden: AgentRun[] } | null {
   const list = p.agents ?? []
   if (list.length === 0) return null
   const hasError = list.some(a => a.state === 'error')
   if (p.agentsDoneAt && now - p.agentsDoneAt > FOLD_MS && !hasError) return null
+  if (!isExpanded) {
+    const urgent = new Set(list.filter(a => a.state === 'waiting' || a.state === 'error').slice(0, max - 1).map(a => a.id))
+    const rest = list.filter(a => !urgent.has(a.id))
+    if (rest.length <= 1 && list.length <= max) return { shown: list, hidden: [] }
+    return { shown: list.filter(a => urgent.has(a.id)), hidden: rest }
+  }
   if (list.length <= max) return { shown: list, hidden: [] }
   const keep = new Set(list.filter(a => a.state !== 'done').slice(0, max - 1).map(a => a.id))
   for (const a of [...list].reverse()) {
@@ -529,11 +554,12 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
       for (let col = 0; col * 3 < SW; col++) {
         for (let r = 0; r < 4; r++) {
           if (hash(col + i * 41, r, 5) > 0.2) continue
-          addDot(dots, `t${Math.floor(hash(col, r, 6) * 4)}`, GUTTER + col * 3, Math.round((y + 2.5 + r * 3.2) * 10) / 10)
+          addDot(dots, 'still', GUTTER + col * 3, Math.round((y + 2.5 + r * 3.2) * 10) / 10)
         }
       }
     }
-    const px = [...dots].map(([cls, d]) => `<path class="${cls}" fill="${c}" fill-opacity=".32" d="${d}"/>`).join('')
+    // a still texture: the pulsing state dot already says the agent is live
+    const px = [...dots].map(([, d]) => `<path fill="${c}" fill-opacity=".32" d="${d}"/>`).join('')
     const nameRoom = isNarrow ? SW - 24 - indent : SW * 0.5
     const spec = [a.model ? modelName(a.model) : '', a.effort ?? ''].filter(Boolean).join(' · ')
     const full = (a.depth > 0 ? '↳ ' : '') + a.title + (spec ? ` (${spec})` : '')
@@ -566,15 +592,18 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
     rows.push({ key: a.id, html, height: y + STRIP_H })
   })
   if (v.hidden.length > 0) {
+    // one grey row for the agents without a strip; a live dot while any of them runs
     const y = v.shown.length === 0 ? 5 : STRIP_GAP
-    const doneCount = v.hidden.filter(a => a.state === 'done').length
+    const isLive = v.hidden.some(a => a.state === 'running')
+    const label = v.shown.length === 0 ? plural(v.hidden.length, 'agent') : plural(v.hidden.length, 'more agent')
     rows.push({
       key: '+',
       height: y + STRIP_H,
       html:
-        gutter(y, `+${v.hidden.length}`, true) +
+        gutter(y, v.shown.length === 0 ? String(v.hidden.length) : `+${v.hidden.length}`, true) +
         `<rect x="${GUTTER}" y="${y}" width="${SW}" height="${STRIP_H}" rx="${STRIP_H / 2}" fill="#808080" fill-opacity=".14"/>` +
-        `<text x="${GUTTER + 10}" y="${y + 11.5}" class="sn st">${plural(v.hidden.length, 'more agent')} · ${doneCount} done</text>`,
+        (isLive ? `<circle cx="${GUTTER + 10}" cy="${y + STRIP_H / 2}" r="3" fill="${AGENT_COLOR.running}" class="sd"/>` : '') +
+        `<text x="${GUTTER + (isLive ? 19 : 10)}" y="${y + 11.5}" class="sn st">${label} · ${tally(v.hidden)}</text>`,
     })
   }
   return rows
@@ -927,11 +956,17 @@ export const register: Register = on => {
     // a session reopened later (an app restart, a resume) finds its bars where it left them
     if ((await read($, plans)).length === 0) await restorePlans($)
     $.clock.every(1000, async () => {
+      const now = await $.clock.now()
+      // a finished bar goes away on its own after a while; a failed one stays until the person closes it
+      const isStale = (p: Plan) => p.state === 'done' && now - (p.endedAt ?? p.agentsDoneAt ?? now) > DONE_LINGER_MS
+      if ((await read($, plans)).some(isStale)) await update($, plans, all => all.filter(p => !isStale(p)))
       const list = await read($, plans)
       forgetGone(list)
+      const isGone = (id: string) => !list.some(p => p.id === id)
+      if ((await read($, expanded)).some(isGone)) await update($, expanded, ids => ids.filter(id => !isGone(id)))
       if (list !== lastSaved) await savePlans($, list)
       // clocks count inside the frame, so the only timed redraw is folding finished strips away
-      if (foldUntil === 0 || (await $.clock.now()) < foldUntil) return
+      if (foldUntil === 0 || now < foldUntil) return
       foldUntil = 0
       if (await read($, isOpen)) await update($, tick, n => n + 1)
     })
@@ -1034,16 +1069,23 @@ export const register: Register = on => {
     // so rows line up whatever their titles; the slack goes into the gap after the title.
     // Desktop reports ~8 CSS px per column; glyph, gaps, percent and the close button take ~126 px.
     const titleWidth = Math.min(Math.round(total * 0.3), Math.max(...list.map(p => Math.round(textWidth(p.title, 6.4)))))
-    const trackW = Math.max(120, Math.min(1400, total - titleWidth - 140))
     await read($, tick)
     const now = await $.clock.now()
+    const opened = await read($, expanded)
+    const budget = stripBudget(list.length)
+    // a bar gets the agents button when folding hides some of its agents; the button sits left of the spacer,
+    // so the tracks stay pinned right, all the same width
+    const isFoldable = (p: Plan) => Svg !== null && (visibleAgents(p, now, budget, false)?.hidden.length ?? 0) > 0
+    const trackW = Math.max(120, Math.min(1400, total - titleWidth - 140 - (Svg !== null ? TOGGLE_W : 0)))
+    const toggle = (id: string) => update($, expanded, ids => (ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]))
     // a hairline between task bars, so each bar and its agent strips read as one group
     const divider = `<svg xmlns="http://www.w3.org/2000/svg" width="${total}" height="1"><rect width="${total}" height="1" fill="#808080" fill-opacity=".22"/></svg>`
 
     return (
       <Box flexDirection="column" gap={1}>
         {list.flatMap((p, i) => {
-          const v = visibleAgents(p, now, stripBudget(list.length))
+          const isExpanded = opened.includes(p.id)
+          const v = visibleAgents(p, now, budget, isExpanded)
           const track = trackSvg(p, trackW)
           // the layer is rebuilt on every redraw anyway, so its clock is set from now each time
           const hover = track.overlay.replace(/\{\{T:(\d+)\}\}/g, (_, t: string) => Math.max(0, (now - Number(t)) / 1000).toFixed(1))
@@ -1052,7 +1094,7 @@ export const register: Register = on => {
                 <Svg
                   key={`strip-${p.id}-${r.key}`}
                   source={liveSource(`${p.id}/${r.key}`, `<svg xmlns="http://www.w3.org/2000/svg" width="${trackW}" height="${r.height}">${STRIP_STYLE}${r.html}</svg>`, now)}
-                  alt={stripAlt(p, r.key)}
+                  alt={stripAlt(p, r.key, v.hidden)}
                   width={trackW}
                   height={r.height}
                 />
@@ -1075,6 +1117,9 @@ export const register: Register = on => {
             <Box key={`bar-${p.id}`} flexDirection="row" alignItems={v ? 'flex-start' : 'center'} gap={1}>
               <Text color={color}>{STATE_GLYPH[p.state]}</Text>
               <Text wrap="truncate">{p.title}</Text>
+              {isFoldable(p) ? (
+                <Button key={`agents-${p.id}`} plain dimColor label={isExpanded ? '▴' : `▾ ${p.agents?.length ?? 0}`} onPress={() => toggle(p.id)} />
+              ) : null}
               <Box flexGrow={1} />
               {Svg ? (
                 <Box flexDirection="column" flexShrink={0}>
