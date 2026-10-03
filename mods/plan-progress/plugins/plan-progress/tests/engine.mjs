@@ -94,6 +94,16 @@ export async function boot(file, kept = new Map()) {
       walk(tree)
       return found
     },
+    // the real AbovePrompt tree; a surface without images (the terminal) resolves no Svg
+    tree: async ({ hasSvg = true } = {}) => {
+      const resolve = $.ui.resolve
+      if (!hasSvg) $.ui.resolve = () => ({ Box: 'Box', Button: 'Button', Text: 'Text' })
+      try {
+        return await dispatch('ui.render', { component: 'AbovePrompt', surface: hasSvg ? 'desktop' : 'terminal', props: { bodyColumns: 140, hasSurvey: false } }, () => null)
+      } finally {
+        $.ui.resolve = resolve
+      }
+    },
     // the Buttons of the real AbovePrompt render, and a press on one by its key, as a click would
     buttons: async () => {
       const tree = await dispatch('ui.render', { component: 'AbovePrompt', surface: 'desktop', props: { bodyColumns: 140, hasSurvey: false } }, () => null)

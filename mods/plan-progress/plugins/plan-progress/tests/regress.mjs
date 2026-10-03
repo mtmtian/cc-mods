@@ -6,6 +6,12 @@ const three = () => [S('One', st('A', 'active'), 'B'), S('Two', 'C')]
 const create = (E, id = 't', stages = three(), title = 'Task') => E.call({ id, title, stages })
 const res = r => r.deny ?? r.result
 const pct = async (E, id) => (await E.view(id)).alt.match(/\d+%/)?.[0]
+// WCAG contrast of two #RRGGBB colours
+const luminance = h => {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+const contrast = (a, b) => (Math.max(luminance(a), luminance(b)) + 0.05) / (Math.min(luminance(a), luminance(b)) + 0.05)
 
 const C = {
   async T01_next(E) {
@@ -178,11 +184,7 @@ const C = {
   // cc-mods: colours come from the desktop app's tokens: white on every state's pill reads at 4.5:1, running is the
   // brand clay, and no cool grey (#808080) is left in what the band draws
   async cc_palette_follows_desktop(E) {
-    const lum = h => {
-      const [r, g, b] = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
-      return 0.2126 * r + 0.7152 * g + 0.0722 * b
-    }
-    const onWhite = h => 1.05 / (lum(h) + 0.05)
+    const onWhite = h => contrast(h, '#FFFFFF')
     const pills = {}
     for (const [id, state] of [['r', 'running'], ['n', 'needs_input'], ['e', 'error'], ['d', 'done']]) {
       await create(E, id, three(), `Bar ${id}`)
@@ -196,6 +198,43 @@ const C = {
     const worst = Math.min(...Object.values(pills).map(h => (h ? onWhite(h) : 0)))
     const ok = pills.running === '#B55C3E' && worst >= 4.5 && !all.includes('#808080')
     return [`pills ${JSON.stringify(pills)}, worst white ${worst.toFixed(2)}:1, cool grey ${all.includes('#808080')}`, ok]
+  },
+  // cc-mods: the state glyph before each title follows the theme too, and stands out from either background (3:1)
+  async cc_glyph_follows_theme(E) {
+    const seen = {}
+    for (const [id, state] of [['r', 'running'], ['n', 'needs_input'], ['e', 'error'], ['d', 'done']]) {
+      await create(E, id, three(), `Bar ${id}`)
+      if (state !== 'running') await E.call({ id, state })
+      const glyph = (await E.svgs()).find(v => v.key === `glyph-${id}`)
+      // the colour of the mark the glyph actually draws: the dot's fill for running, the icon's stroke otherwise
+      const src = glyph?.source ?? ''
+      const cls = src.includes('class="gf"') ? 'gf' : 'gs'
+      const prop = cls === 'gf' ? 'fill' : 'stroke'
+      const [base, media] = src.split('@media (prefers-color-scheme:light)')
+      const pick = css => css?.match(new RegExp(`\\.${cls}\\{${prop}:(#[0-9A-F]{6})\\}`))?.[1]
+      const dark = pick(base)
+      const light = pick(media)
+      seen[state] = { dark, light, onDark: dark && contrast(dark, '#262624'), onLight: light && contrast(light, '#FAF9F5'), alt: glyph?.alt }
+    }
+    const ok = Object.values(seen).every(g => g.dark && g.light && g.onDark >= 3 && g.onLight >= 3 && g.alt)
+    const worst = Math.min(...Object.values(seen).flatMap(g => [g.onDark ?? 0, g.onLight ?? 0]))
+    return [`${Object.entries(seen).map(([k, g]) => `${k} ${g.dark}/${g.light}`).join(', ')}; worst ${worst.toFixed(1)}:1`, ok]
+  },
+  // cc-mods: a surface without images (the terminal) keeps the coloured state character, one symbol per state
+  async cc_terminal_keeps_text_glyph(E) {
+    await create(E)
+    await create(E, 'x', [S('X', st('Y', 'active'))], 'Broken')
+    await E.call({ id: 'x', failed: 'Y' })
+    const texts = []
+    const walk = n => {
+      if (Array.isArray(n)) return n.forEach(walk)
+      if (!n || typeof n !== 'object') return
+      if (n.type === 'Text' && n.props.color) texts.push(`${n.children.join('')}:${n.props.color}`)
+      if (n.type === 'Svg') texts.push('SVG')
+      ;(n.children ?? []).forEach(walk)
+    }
+    walk(await E.tree({ hasSvg: false }))
+    return [texts.join(' '), texts.includes('●:#D97757') && texts.includes('×:#B53333') && !texts.includes('SVG')]
   },
   // cc-mods: the demo-reel entry is gone; "reel" with a note is an ordinary id, refused until it has stages
   async cc_reel_entry_gone(E) {
