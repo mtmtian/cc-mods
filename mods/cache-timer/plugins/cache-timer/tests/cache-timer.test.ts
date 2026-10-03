@@ -1,5 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
-import type { EngineInterface, On, TurnUsage } from 'claude-code'
+import type { Engine } from 'claude-code/testing'
+import type { On, TurnUsage } from 'claude-code'
 
 const MINUTE = 60_000
 const T0 = 1_000_000_000
@@ -28,6 +29,7 @@ const world = (on: On) => {
   let usage: TurnUsage | null = null
   on('ui.invalidate', () => {
     redraws += 1
+    return { value: undefined }
   })
   // the engine's own chip, which the mod must keep drawing beside its label
   on('ui.render', { component: 'SessionMode' }, () => ({ type: 'Text', props: {}, children: ['native'] }))
@@ -36,7 +38,7 @@ const world = (on: On) => {
   on('turn.step', async function* (_$, e) {
     return { turnId: e.turnId, index: e.index, answer: 'ok', toolUses: [], stopReason: 'end_turn', usage }
   })
-  const step = async ($: EngineInterface, next: TurnUsage | null, agentId?: string) => {
+  const step = async ($: Engine, next: TurnUsage | null, agentId?: string) => {
     usage = next
     const stream = $.turn.step({ turnId: 't', index: 0, model: 'opus', messageCount: 2, ...(agentId ? { agentId } : {}) })
     for await (const _ of stream) {
@@ -44,9 +46,9 @@ const world = (on: On) => {
     }
     await stream.result
   }
-  const start = ($: EngineInterface) => $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
+  const start = ($: Engine) => $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
   // The footer chip as drawn on the desktop, flattened to its texts in order.
-  const footer = async ($: EngineInterface) => {
+  const footer = async ($: Engine) => {
     const tree = await $.ui.render({ component: 'SessionMode', surface: 'desktop', requestId: 'session-mode', props: { modes: [] } })
     const texts: string[] = []
     const walk = (n: unknown): void => {
@@ -57,7 +59,7 @@ const world = (on: On) => {
     walk(tree)
     return texts
   }
-  const shown = async ($: EngineInterface) => (await footer($)).find(t => t.startsWith('Cache'))
+  const shown = async ($: Engine) => (await footer($)).find(t => t.startsWith('Cache'))
 
   return { clock, step, start, footer, shown, redraws: () => redraws }
 }
