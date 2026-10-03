@@ -40,6 +40,27 @@ claude plugin update md-prompt@cc-mods
 
 While working on a mod, `--plugin-dir` loads the checkout directly and reloads on save (for md-prompt: `claude --plugin-dir mods/md-prompt/plugins/md-prompt`); each mod's own README has its test commands.
 
+## Run the checks
+
+Use the Node.js version in [`.node-version`](.node-version), then run from the repo root:
+
+```bash
+npm ci
+npm run ci
+```
+
+The root [CI workflow](.github/workflows/ci.yml) runs on every pull request, pushes to `main`, and manual dispatch. Test and plugin checks run on standard Ubuntu and macOS runners; workflow and shell checks run in a separate Ubuntu job:
+
+| Check | What it covers |
+| --- | --- |
+| `npm test` | md-prompt's Bun tests, plan-progress's asserted stub-engine regressions, and the upstream-status script's local Git fixtures |
+| `npm run check:plugins` | Marketplace/source/name/license consistency, strict Claude manifest validation, native hook tests for md-prompt and cache-timer, and TypeScript checks for all three plugins |
+| Workflow and shell checks | actionlint for the active root workflow and ShellCheck for the repository's shell scripts |
+
+The plugin checks copy the plugins into a temporary directory, use a fresh Claude config, and generate SDK declarations for the locked CLI version there. `/cost` is a local command: no login or model API key is needed. The API endpoint is set to a closed local port, so an accidental model request fails. The temporary copies are removed even when a check fails. These checks do not replace testing real prompt editing, desktop rendering or audio in Claude Desktop.
+
+Development tools are version-pinned in `package.json` and `package-lock.json`; Actions use full commit SHAs. Dependabot proposes weekly npm-tool and Action updates; update actionlint's version and checksum together in the workflow. Claude and Bun require their native-binary install scripts, approved by exact version in `allowScripts`. When updating either package, review its install script, update the approval with `npm install-scripts approve <package>`, and rerun the checks. CI has read-only repository permissions, cancels superseded PR runs, and uses neither uploaded artifacts nor dependency caches.
+
 ## Check and pull upstream changes
 
 [`upstreams.tsv`](upstreams.tsv) lists each mod's upstream URL and branch. `scripts/upstream-status.sh` reads it and, per mod, prints the upstream commit last synced, the upstream commits since, the paths changed here, and the paths changed on both sides (`overlap_path=`, where a pull may conflict). It only fetches; it never pulls or edits a mod. `scripts/test-upstream-status.sh` checks it against a throwaway upstream.
