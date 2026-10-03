@@ -75,6 +75,9 @@ export async function boot(file, kept = new Map()) {
     step: (agentId, effort) => (async () => { const g = hooks.find(h => h.event === 'turn.step').fn($, { agentId, model: 'claude-haiku-4-5-20251001', effort, turnId: 't', index: 0, messageCount: 1 }, async function* () {}); for await (const _ of g); })(),
     agentTool: (agentId, tool) => dispatch('tool.call', { tool, agentId, tool_use_id: uid() }, () => ({ result: {} })),
     // an agent's call held on a permission prompt: the check says ask and the call stays open past the mod's 600 ms wait
+    // the engine's notice that a permission dialog has waited on the person (6 s on the desktop) or another kind of notice
+    notify: (notification_type, agentId) =>
+      dispatch('classic.Notification', { notification_type, message: 'Claude needs your permission to use Bash', ...(agentId ? { agent_id: agentId } : {}) }, () => ({})),
     approval: agentId => {
       const id = uid()
       return dispatch('tool.call', { tool: 'Bash', agentId, tool_use_id: id }, async () => {

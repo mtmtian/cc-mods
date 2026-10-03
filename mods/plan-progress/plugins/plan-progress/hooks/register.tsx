@@ -757,7 +757,7 @@ function addRun(p: Plan, run: AgentRun, parentId: string | undefined, now: numbe
   return syncAuto({ ...p, agents: list, agentsDoneAt: null }, now)
 }
 
-// changes one agent's strip inside the latest list; silent: an agent sounds only when it waits on the person
+// changes one agent's strip inside the latest list; silent: a prompt sounds through the engine's notification
 async function editAgent($: EngineInterface, agentId: string, change: (a: AgentRun) => AgentRun) {
   const home = agentHome.get(agentId)
   if (!home) return
@@ -1201,6 +1201,13 @@ export const register: Register = on => {
     return started
   })
 
+  // a permission dialog the engine put to the person and left unanswered (6 s on the desktop): the one prompt sound,
+  // for the main thread and agents alike; an ask a mode, a hook or the main agent settles never comes here
+  on('classic.Notification', { notification_type: 'permission_prompt' }, async ($, e, next) => {
+    play($, 'decision')
+    return next(e)
+  })
+
   // an agent waiting on a permission prompt turns its strip amber until the call goes on
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
@@ -1210,8 +1217,6 @@ export const register: Register = on => {
     if (agentId && useId && verdict.decision === 'ask') {
       $.clock.after(600, async () => {
         if (toolUses.get(useId) !== agentId) return
-        // the one moment an agent needs the person, on whatever bar it sits
-        if (!waiting.has(agentId)) play($, 'decision')
         waiting.add(agentId)
         await editAgent($, agentId, a => ({ ...a, state: 'waiting', tool: 'Needs approval' }))
       })

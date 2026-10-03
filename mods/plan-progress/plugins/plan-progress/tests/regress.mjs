@@ -402,12 +402,20 @@ const C = {
     await E.turnComplete('ag3', 'aborted')
     return [`sounds ${JSON.stringify(E.sounds)}`, E.sounds.length === 0]
   },
-  async cc_agent_held_on_approval_sounds_once(E) {
+  async cc_agent_held_on_approval_is_quiet_unless_asked(E) {
+    // held on a check the person never sees (the mode, a hook, the main agent): strip turns amber, no sound
     await create(E)
     await E.spawn('ag1', 'Scan')
     await E.approval('ag1')
     await E.agentTool('ag1', 'Read')
-    return [`sounds ${JSON.stringify(E.sounds)}`, JSON.stringify(E.sounds) === '["sounds/decision.wav"]']
+    return [`sounds ${JSON.stringify(E.sounds)}`, E.sounds.length === 0]
+  },
+  async cc_permission_prompt_to_the_person_sounds(E) {
+    await E.notify('permission_prompt', 'ag1') // an agent's dialog left waiting on the person
+    await E.notify('permission_prompt') // the main thread's
+    await E.notify('idle_prompt') // not a question
+    const want = '["sounds/decision.wav","sounds/decision.wav"]'
+    return [`sounds ${JSON.stringify(E.sounds)}`, JSON.stringify(E.sounds) === want]
   },
   async cc_main_plan_still_sounds(E) {
     await create(E)
