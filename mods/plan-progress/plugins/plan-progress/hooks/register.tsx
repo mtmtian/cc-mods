@@ -1059,24 +1059,6 @@ export const register: Register = on => {
     return { text: 'Sounds: decision, error, done.' }
   })
 
-  // drawn only while there is a plan to show or hide; with none the footer is the engine's alone
-  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
-    const count = (await read($, plans)).length
-    if (count === 0) return next(e)
-    const open = await read($, isOpen)
-    const { Box, Button } = $.ui.resolve(e)
-    // other mods add their labels to modes beneath us; keep them
-    const below = await next(e)
-    const press = () => update($, isOpen, () => !open)
-
-    return (
-      <Box flexDirection="row" alignItems="center" gap={1}>
-        <Button key="progress-toggle" dimColor={!open} label={count > 1 ? `Progress ${count}` : 'Progress'} onPress={press} />
-        {below}
-      </Box>
-    )
-  })
-
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const list = await read($, plans)
     if (list.length === 0 || e.props.hasSurvey || !(await read($, isOpen))) return next(e)
