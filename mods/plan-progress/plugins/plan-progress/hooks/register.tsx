@@ -19,8 +19,8 @@ const stripBudget = (bars: number) => (bars >= 3 ? 3 : bars === 2 ? 4 : 5)
 const FOLD_MS = 5000 // finished strips stay this long, failed ones stay until the bar closes
 const DONE_LINGER_MS = 60_000 // a finished bar goes away on its own after this; a failed one waits for its ✕
 const HEAD_TWINKLE = 48 // px behind the head of a running bar that still twinkle; the rest of the fill holds still
-const TOGGLE_W = 32 // px the agents button (▾ 4 / ▴) takes after a title; reserved on every desktop row, so a button
-// appearing with a second agent never narrows the tracks under the person's eyes
+const TOGGLE_W = 32 // px the agents button (▾ / ▴) takes at the end of a bar's last agent row; every strip leaves it
+// free, so the button appearing with a second agent never moves a strip under the person's eyes
 
 // the desktop app's own tokens, so the band reads as part of it: running in the brand clay (--accent-brand), waiting on
 // the person in its accent blue (--accent-100), error and done in its danger and success (light theme's -100).
@@ -236,39 +236,20 @@ const lastHead = new Map<string, number>()
 // the track draws in a sandboxed frame (for hover); its page must stay see-through in either theme
 const SEE_THROUGH = '<style>:root,html,body{background:transparent!important;color-scheme:light dark;margin:0;overflow:hidden}svg{display:block}</style>'
 
-// a clock that counts in the frame by itself, so the drawing never has to be redrawn each second (a redraw
-// reloads the frame and everything in it blinks): each digit is a reel of its figures behind a one-line window,
-// stepped by a CSS animation whose negative delay is the time already run. Plain SVG, since the host's frame
-// drops foreignObject. {{T:start}} becomes those seconds at every draw (stamp)
+// cc-mods: a running clock is plain text, written at every draw ({{T:start}}, stamp), and the band is drawn again on
+// each wall-clock second while one shows (beatOnTheSecond). The desktop shows a band's last answer again, restarting
+// its pictures, on repaints that never reach the mod (another plugin's redraw each second, a tool's timer); a clock
+// that ran by itself in CSS started over from the time of that answer each time and stepped back a second
 const CLOCK_W = 48 // "59m 59s"
-const LINE = 16
-const CLOCK_CSS = `.ckt{font-variant-numeric:tabular-nums}
-.rs1{animation:r10 10s steps(10) var(--d) infinite}.rs10{animation:r6 60s steps(6) var(--d) infinite}
-.cc{animation:cc 600s linear var(--d) both}@keyframes cc{0%,9.99%{transform:translateX(-13.5px)}10%,99.99%{transform:translateX(-3.25px)}100%{transform:none}}
-.rm1{animation:r10 600s steps(10) var(--d) infinite}.rm10{animation:r10 6000s steps(10) var(--d) infinite}.rmm{animation:hm 60s steps(1,end) var(--d) both}
-@keyframes r10{to{transform:translateY(-${LINE * 10}px)}}@keyframes r6{to{transform:translateY(-${LINE * 6}px)}}@keyframes hm{from{opacity:0}to{opacity:1}}`
+const CLOCK_CSS = '.ck{font-variant-numeric:tabular-nums}'
+// whole wall-clock seconds, so every clock on the band steps at the same instant, the one the band is drawn again at
+const runFor = (start: number, end: number) => Math.max(0, Math.floor(end / 1000) - Math.floor(start / 1000)) * 1000
 
-// x is the clock's left edge, top the window's top; the minutes part stays hidden for the first minute
-function liveClock(x: number, top: number, start: number, cls: string, textCls: string, isCentered = false): string {
-  const base = top + 12
-  const reel = (cx: number, figures: string[], reelCls: string) =>
-    `<g class="${reelCls}"><text class="${textCls} ckt" text-anchor="middle">${figures
-      .map((f, i) => `<tspan x="${cx.toFixed(1)}" y="${base + i * LINE}">${f}</tspan>`)
-      .join('')}</text></g>`
-  const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
-  const id = `ck${start}x${Math.round(x)}y${Math.round(top)}`
-  return (
-    `<style>.${id}{--d:-{{T:${start}}}s}</style><g class="${cls} ${id}"><clipPath id="${id}"><rect x="${(x - 2).toFixed(1)}" y="${top}" width="${CLOCK_W + 4}" height="${LINE}"/></clipPath>` +
-    `<g clip-path="url(#${id})"${isCentered ? ' class="cc"' : ''}><g class="rmm">${reel(x + 3.5, ['', ...digits.slice(1)], 'rm10')}${reel(x + 10.5, digits, 'rm1')}` +
-    `<text x="${(x + 14).toFixed(1)}" y="${base}" class="${textCls}">m</text></g>` +
-    `${reel(x + 31, digits.slice(0, 6), 'rs10')}${reel(x + 38, digits, 'rs1')}<text x="${(x + 41.5).toFixed(1)}" y="${base}" class="${textCls}">s</text></g></g>`
-  )
+function liveClock(x: number, y: number, start: number, cls: string, anchor: 'end' | 'middle'): string {
+  return `<text x="${x.toFixed(1)}" y="${y}" text-anchor="${anchor}" class="${cls} ck">{{T:${start}}}</text>`
 }
 
-// the desktop shows a drawing afresh on later redraws even when its markup is unchanged, and that restarts its
-// clocks: each draw starts them at the time already run, never at a time kept from an earlier draw
-const stamp = (template: string, now: number) =>
-  template.replace(/\{\{T:(\d+)\}\}/g, (_, t: string) => Math.max(0, (now - Number(t)) / 1000).toFixed(1))
+const stamp = (template: string, now: number) => template.replace(/\{\{T:(\d+)\}\}/g, (_, t: string) => elapsed(runFor(Number(t), now)))
 
 // a bar is drawn twice: the track itself as a plain picture, and a see-through layer on top for the hover parts
 // (checkpoint times, the pill's clock). That layer needs an interactive frame, and the desktop rebuilds such frames
@@ -380,7 +361,7 @@ function drawTrack(p: Plan, W: number): Track {
       done ? `<path d="${ICON_PATH.done}" transform="translate(-6 5) scale(.5)" fill="none" stroke="${INK}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>` : `<text x="0" y="${H / 2 + 4.2}" text-anchor="middle" class="kt">${label}</text>`
     }`
   } else {
-    const name = done ? (p.endedAt ? elapsed(p.endedAt - p.startedAt) : 'Done') : single ? (p.stages[0]?.name ?? 'Tasks') : (p.stages[w.stage]?.name ?? '')
+    const name = done ? (p.endedAt ? elapsed(runFor(p.startedAt, p.endedAt)) : 'Done') : single ? (p.stages[0]?.name ?? 'Tasks') : (p.stages[w.stage]?.name ?? '')
     // the pill carries the stage name alone; the fill and the percent already say how far along it is
     const count = ''
     const iconW = icon ? 16 : 0
@@ -402,7 +383,7 @@ function drawTrack(p: Plan, W: number): Track {
       const face = `<rect x="${-kw / 2}" y="0" width="${kw}" height="${H}" rx="${H / 2}" fill="${color}"/>${
         icon ? `<path d="${icon}" transform="translate(${left.toFixed(1)} 5) scale(.5)" fill="none" stroke="${INK}" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>` : ''
       }`
-      timePill = `<g class="kb"><rect x="${-kw / 2}" y="0" width="${kw}" height="${H}" fill="#000" fill-opacity="0"/><g class="kv">${face}${liveClock(mid - CLOCK_W / 2, 3, p.startedAt, 'kc0', 'kt', true)}</g></g>`
+      timePill = `<g class="kb"><rect x="${-kw / 2}" y="0" width="${kw}" height="${H}" fill="#000" fill-opacity="0"/><g class="kv">${face}${liveClock(mid, H / 2 + 4.2, p.startedAt, 'kc0 kt', 'middle')}</g></g>`
     }
   }
   const clampX = (x: number) => Math.max(kw / 2, Math.min(W - kw / 2, x))
@@ -583,8 +564,8 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
     if (name !== full) name = name.trimEnd() + '…'
     const time =
       a.endedAt === null
-        ? liveClock(W - 9 - CLOCK_W, y, a.startedAt, 'sc', 'sn st')
-        : `<text x="${W - 9}" y="${y + 11.5}" text-anchor="end" class="sn st">${elapsed(a.endedAt - a.startedAt)}</text>`
+        ? liveClock(W - 9, y + 11.5, a.startedAt, 'sc sn st', 'end')
+        : `<text x="${W - 9}" y="${y + 11.5}" text-anchor="end" class="sn st">${elapsed(runFor(a.startedAt, a.endedAt))}</text>`
     const tool = isNarrow
       ? ''
       : (isWordChanged && was.tool ? `<text x="${toolEnd}" y="${y + 11.5}" text-anchor="end" class="sn mo ${WORD_CLASS[was.color] ?? ''}">${esc(was.tool)}</text>` : '') +
@@ -820,7 +801,7 @@ function stripCells(v: { shown: AgentRun[]; hidden: AgentRun[] }, W: number, now
     const indent = a.depth > 0 ? 2 : 0
     const dotColor = running ? mix(tint, c, 0.3 + 0.7 * q(wave(now, 1100))) : c
     g.text(2 + indent, y, '●', pack(dotColor), pack(tint))
-    const time = elapsed((a.endedAt ?? now) - a.startedAt)
+    const time = elapsed(runFor(a.startedAt, a.endedAt ?? now))
     const narrow = W < 30
     const tx = W - 2 - time.length
     // the tool word sits at the right, just before the time, so the name and its model get the rest of the row
@@ -867,6 +848,18 @@ const isGliding = (p: Plan, t: number) => {
   return g !== undefined && g.from !== g.to && t - g.at < GLIDE_MS + 100
 }
 const isAnimated = (p: Plan, t: number) => (isTurnLive && p.state === 'running') || hasRunningAgents(p) || isGliding(p, t)
+
+// cc-mods: whether the band last drawn on the desktop shows a running clock (a running strip, a pill's hover time);
+// while it does, the band is drawn again just after each wall-clock second, so its clocks step with the time
+let hasLiveClock = false
+let isBeating = false
+function beatOnTheSecond($: EngineInterface, now: number) {
+  isBeating = true
+  $.clock.after(1000 - (now % 1000) + 25, async () => {
+    if (hasLiveClock && (await read($, isOpen))) await update($, tick, n => n + 1)
+    beatOnTheSecond($, await $.clock.now())
+  })
+}
 
 // the 30 fps clock runs only while a terminal band has something moving; the second timer starts and stops it
 function syncFrames($: EngineInterface, now: number) {
@@ -1229,6 +1222,7 @@ export const register: Register = on => {
     if ((await read($, plans)).length === 0) await restorePlans($)
     const theme = (await $.config.list().catch(() => [])).find(row => row.key === 'theme')
     isLight = /light/i.test(String(theme?.value ?? ''))
+    if (!isBeating) beatOnTheSecond($, await $.clock.now())
     $.clock.every(1000, async () => {
       const now = await $.clock.now()
       // a finished bar goes away on its own after a while; a failed one stays until the person closes it
@@ -1308,6 +1302,7 @@ export const register: Register = on => {
     const list = await read($, plans)
     if (list.length === 0 || e.props.hasSurvey || !(await read($, isOpen))) {
       band = null
+      hasLiveClock = false
       return next(e)
     }
     if (e.surface === 'terminal') {
@@ -1319,6 +1314,7 @@ export const register: Register = on => {
       const titleW = Math.max(4, Math.min(Math.round(cols * 0.28), Math.max(...list.map(p => cellsOf(p.title)))))
       const trackW = Math.max(12, Math.min(512, cols - titleW - (hasClicks ? 15 : 13)))
       band = { requestId: e.requestId, W: trackW, list }
+      hasLiveClock = false
       return (
         <Box flexDirection="column">
           {list.map(p => {
@@ -1365,79 +1361,99 @@ export const register: Register = on => {
     const now = await $.clock.now()
     const opened = await read($, expanded)
     const budget = stripBudget(list.length)
-    // a bar gets the agents button when folding hides some of its agents; the button sits left of the spacer,
-    // so the tracks stay pinned right, all the same width
+    // a bar gets the agents button when folding hides some of its agents. It sits at the end of the bar's last agent
+    // row (the summary row while folded), in a column the strips always leave free, so the button coming and going
+    // never moves a strip, and the tracks stay pinned right, all the same width
     const isFoldable = (p: Plan) => Svg !== null && (visibleAgents(p, now, budget, false)?.hidden.length ?? 0) > 0
-    const trackW = Math.max(120, Math.min(1400, total - titleWidth - 140 - (Svg !== null ? TOGGLE_W : 0)))
+    const trackW = Math.max(120, Math.min(1400, total - titleWidth - 140))
+    const stripW = trackW - TOGGLE_W
     const toggle = (id: string) => update($, expanded, ids => (ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]))
+    // what this draw stamps; a running clock in it keeps the band drawn again on each second
+    let isLive = false
+    const draw = (template: string) => {
+      if (template.includes('{{T:')) isLive = true
+      return stamp(template, now)
+    }
     // a hairline between task bars, so each bar and its agent strips read as one group
     const divider = `<svg xmlns="http://www.w3.org/2000/svg" width="${total}" height="1"><rect width="${total}" height="1" fill="#8C8A82" fill-opacity=".22"/></svg>`
 
+    const bars = list.flatMap((p, i) => {
+      const isExpanded = opened.includes(p.id)
+      const v = visibleAgents(p, now, budget, isExpanded)
+      const track = trackSvg(p, trackW, now)
+      const hover = draw(track.overlay)
+      const canFold = isFoldable(p)
+      const strips = v && Svg
+        ? stripsSvg(v, p.agents ?? [], stripW, now).map((r, j, rows) => {
+            const strip = (
+              <Svg
+                key={`strip-${p.id}-${r.key}`}
+                source={draw(`<svg xmlns="http://www.w3.org/2000/svg" width="${stripW}" height="${r.height}">${STRIP_STYLE}${r.html}</svg>`)}
+                alt={stripAlt(p, r.key, v.hidden)}
+                width={stripW}
+                height={r.height}
+              />
+            )
+            if (j < rows.length - 1 || !canFold) return strip
+            return (
+              <Box key={`fold-${p.id}`} flexDirection="row" alignItems="flex-end">
+                {strip}
+                <Box width={TOGGLE_W} justifyContent="center">
+                  <Button key={`agents-${p.id}`} plain dimColor label={isExpanded ? '▴' : '▾'} onPress={() => toggle(p.id)} />
+                </Box>
+              </Box>
+            )
+          })
+        : []
+      const agentsAlt = v ? `; agents: ${(p.agents ?? []).map(a => `${a.title} ${a.state}`).join(', ')}` : ''
+      const line = i > 0 && Svg ? [<Svg key={`div-${p.id}`} source={divider} alt="divider" width={total} height={1} />] : []
+      const w = where(p)
+      const pct = p.state === 'done' ? 100 : Math.round((Math.min(w.pos, w.total) / Math.max(1, w.total)) * 100)
+      const color = STATE_COLOR[p.state]
+      const stageName = p.stages[w.stage]?.name ?? ''
+      const alt =
+        p.state === 'done'
+          ? `${p.title}: done, ${plural(w.total, 'step')}${p.endedAt ? ` in ${elapsed(runFor(p.startedAt, p.endedAt))}` : ''}`
+          : `${p.title}: ${stageName}, step ${w.step} of ${w.stageSize}, ${pct}%${p.note ? ` — ${p.note}` : ''}${agentsAlt}`
+      const bar = `${'━'.repeat(Math.round(pct / 4))}${'─'.repeat(25 - Math.round(pct / 4))}`
+
+      return [
+        ...line,
+        <Box key={`bar-${p.id}`} flexDirection="row" alignItems={v ? 'flex-start' : 'center'} gap={1}>
+          {Svg ? (
+            <Svg key={`glyph-${p.id}`} source={GLYPH_SVG[p.state]} alt={p.state.replaceAll('_', ' ')} width={12} height={20} />
+          ) : (
+            <Text color={color}>{STATE_GLYPH[p.state]}</Text>
+          )}
+          <Text wrap="truncate">{p.title}</Text>
+          <Box flexGrow={1} />
+          {Svg ? (
+            <Box flexDirection="column" flexShrink={0}>
+              <Box key={`track-${p.id}`}>
+                <Svg source={track.base} alt={alt} width={trackW} height={TRACK_H} />
+                <Box position="absolute" top={0} left={0}>
+                  <Svg source={hover} alt={`${p.title}: hover for times`} width={trackW} height={TRACK_H} isInteractive />
+                </Box>
+              </Box>
+              {strips}
+            </Box>
+          ) : (
+            <Text>
+              <Text color={color}>{bar.replace(/─/g, '')}</Text>
+              <Text dimColor>{bar.replace(/━/g, '')}</Text>
+              <Text color={color}>{` ${stageName} ${w.step}/${w.stageSize}`}</Text>
+            </Text>
+          )}
+          <Text dimColor>{`${String(pct).padStart(3, FIGURE_SPACE)}%`}</Text>
+          <Button key={`close-${p.id}`} plain dimColor label="✕" onPress={() => dropPlan($, p.id)} />
+        </Box>,
+      ]
+    })
+    hasLiveClock = isLive
+
     return (
       <Box flexDirection="column" gap={1}>
-        {list.flatMap((p, i) => {
-          const isExpanded = opened.includes(p.id)
-          const v = visibleAgents(p, now, budget, isExpanded)
-          const track = trackSvg(p, trackW, now)
-          const hover = stamp(track.overlay, now)
-          const strips = v && Svg
-            ? stripsSvg(v, p.agents ?? [], trackW, now).map(r => (
-                <Svg
-                  key={`strip-${p.id}-${r.key}`}
-                  source={stamp(`<svg xmlns="http://www.w3.org/2000/svg" width="${trackW}" height="${r.height}">${STRIP_STYLE}${r.html}</svg>`, now)}
-                  alt={stripAlt(p, r.key, v.hidden)}
-                  width={trackW}
-                  height={r.height}
-                />
-              ))
-            : []
-          const agentsAlt = v ? `; agents: ${(p.agents ?? []).map(a => `${a.title} ${a.state}`).join(', ')}` : ''
-          const line = i > 0 && Svg ? [<Svg key={`div-${p.id}`} source={divider} alt="divider" width={total} height={1} />] : []
-          const w = where(p)
-          const pct = p.state === 'done' ? 100 : Math.round((Math.min(w.pos, w.total) / Math.max(1, w.total)) * 100)
-          const color = STATE_COLOR[p.state]
-          const stageName = p.stages[w.stage]?.name ?? ''
-          const alt =
-            p.state === 'done'
-              ? `${p.title}: done, ${plural(w.total, 'step')}${p.endedAt ? ` in ${elapsed(p.endedAt - p.startedAt)}` : ''}`
-              : `${p.title}: ${stageName}, step ${w.step} of ${w.stageSize}, ${pct}%${p.note ? ` — ${p.note}` : ''}${agentsAlt}`
-          const bar = `${'━'.repeat(Math.round(pct / 4))}${'─'.repeat(25 - Math.round(pct / 4))}`
-
-          return [
-            ...line,
-            <Box key={`bar-${p.id}`} flexDirection="row" alignItems={v ? 'flex-start' : 'center'} gap={1}>
-              {Svg ? (
-                <Svg key={`glyph-${p.id}`} source={GLYPH_SVG[p.state]} alt={p.state.replaceAll('_', ' ')} width={12} height={20} />
-              ) : (
-                <Text color={color}>{STATE_GLYPH[p.state]}</Text>
-              )}
-              <Text wrap="truncate">{p.title}</Text>
-              {isFoldable(p) ? (
-                <Button key={`agents-${p.id}`} plain dimColor label={isExpanded ? '▴' : `▾ ${p.agents?.length ?? 0}`} onPress={() => toggle(p.id)} />
-              ) : null}
-              <Box flexGrow={1} />
-              {Svg ? (
-                <Box flexDirection="column" flexShrink={0}>
-                  <Box key={`track-${p.id}`}>
-                    <Svg source={track.base} alt={alt} width={trackW} height={TRACK_H} />
-                    <Box position="absolute" top={0} left={0}>
-                      <Svg source={hover} alt={`${p.title}: hover for times`} width={trackW} height={TRACK_H} isInteractive />
-                    </Box>
-                  </Box>
-                  {strips}
-                </Box>
-              ) : (
-                <Text>
-                  <Text color={color}>{bar.replace(/─/g, '')}</Text>
-                  <Text dimColor>{bar.replace(/━/g, '')}</Text>
-                  <Text color={color}>{` ${stageName} ${w.step}/${w.stageSize}`}</Text>
-                </Text>
-              )}
-              <Text dimColor>{`${String(pct).padStart(3, FIGURE_SPACE)}%`}</Text>
-              <Button key={`close-${p.id}`} plain dimColor label="✕" onPress={() => dropPlan($, p.id)} />
-            </Box>,
-          ]
-        })}
+        {bars}
       </Box>
     )
   })

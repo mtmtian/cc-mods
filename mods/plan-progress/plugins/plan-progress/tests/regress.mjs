@@ -18,6 +18,18 @@ const luminance = h => {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b
 }
 const contrast = (a, b) => (Math.max(luminance(a), luminance(b)) + 0.05) / (Math.min(luminance(a), luminance(b)) + 0.05)
+// the time a running clock reads in a drawing, and the tick that draws the band again
+const clock = s => s?.match(/ ck">([^<]*)</)?.[1]
+const tickOf = E => E.$.__get({ ref: { key: 'tick' }, initial: 0 })
+// the nodes of a tree that match, depth first
+const nodes = (n, pred, acc = []) => {
+  if (Array.isArray(n)) n.forEach(c => nodes(c, pred, acc))
+  else if (n && typeof n === 'object') {
+    if (pred(n)) acc.push(n)
+    ;(n.children ?? []).forEach(c => nodes(c, pred, acc))
+  }
+  return acc
+}
 
 const C = {
   async T01_next(E) {
@@ -262,9 +274,9 @@ const C = {
   async same_bar_same_source_while_time_passes(E) {
     await create(E)
     await E.spawn('ag1', 'Scan tests')
-    // the still parts: the track picture and the strips, apart from the time their clocks start at, which every
+    // the still parts: the track picture and the strips, apart from the time their clocks read, which every
     // draw sets from now (the hover layer is rebuilt every redraw by design)
-    const still = v => (v.track + v.strips.join('')).replace(/--d:-[\d.]+s/g, '--d')
+    const still = v => (v.track + v.strips.join('')).replace(/ ck">[^<]*</g, ' ck"><')
     const a = still(await E.view('t'))
     E.tick(7000)
     const b = still(await E.view('t'))
@@ -272,9 +284,9 @@ const C = {
     const c = still(await E.view('t'))
     return [`idle redraw same ${a === b}, change redraws ${a !== c}`, a === b && a !== c]
   },
-  // cc-mods: the desktop shows a strip's drawing afresh on later redraws, which restarts its CSS clock and one-shot
-  // morph. A strip whose word last changed at 1m 00s, drawn 30 s later with nothing changed, read "1m 00s" again with
-  // "Needs approval" blurring into "Bash" each time; every draw must start its clock at the time now and morph once
+  // cc-mods: the desktop shows a strip's drawing afresh on later redraws, which restarts its one-shot morph. A strip
+  // whose word last changed at 1m 00s, drawn 30 s later with nothing changed, read "1m 00s" again with "Needs approval"
+  // blurring into "Bash" each time; every draw must write its clock at the time now and morph once
   async cc_idle_strip_redraw_keeps_time_and_morphs_once(E) {
     await create(E)
     await E.spawn('ag1', 'Scan tests')
@@ -288,11 +300,10 @@ const C = {
     const at = (await E.view('t')).strips[0] ?? ''
     E.tick(30_000)
     const later = (await E.view('t')).strips[0] ?? ''
-    const delay = s => s.match(/--d:-([\d.]+)s/)?.[1]
     const isMorph = s => s.includes(' mo ') || s.includes('<animate ')
     return [
-      `at the change: delay ${delay(at)}s, morph ${isMorph(at)}; 30 s later: delay ${delay(later)}s, morph ${isMorph(later)}`,
-      delay(at) === '60.0' && isMorph(at) && delay(later) === '90.0' && !isMorph(later),
+      `at the change: ${clock(at)}, morph ${isMorph(at)}; 30 s later: ${clock(later)}, morph ${isMorph(later)}`,
+      clock(at) === '1m 0s' && isMorph(at) && clock(later) === '1m 30s' && !isMorph(later),
     ]
   },
   // cc-mods: the same for the track's head, which slides to a new step once and then stands; a finished bar's pill
@@ -319,8 +330,7 @@ const C = {
     E.tick(83_000)
     await E.call({ id: 't', next: true })
     const src = (await E.view('t')).overlay
-    const delay = src.match(/--d:-([\d.]+)s/)?.[1]
-    return [`clock ${src.includes('class="kc0 ')}, delay ${delay}s`, src.includes('class="kc0 ') && delay === '83.0' && !src.includes('{{T:')]
+    return [`clock ${src.includes('class="kc0 ')}, reads ${clock(src)}`, src.includes('class="kc0 ') && clock(src) === '1m 23s' && !src.includes('{{T:')]
   },
   async done_pill_static_time(E) {
     await create(E)
@@ -328,6 +338,41 @@ const C = {
     await E.call({ id: 't', state: 'done' })
     const src = (await E.view('t')).source
     return [`2m 5s ${src.includes('2m 5s')}, no clock ${!src.includes('class="kc0 ')}`, src.includes('2m 5s') && !src.includes('class="kc0 ')]
+  },
+  // cc-mods: the desktop shows a band's last answer again on repaints that never reach the mod (another plugin's redraw
+  // each second, a tool's timer), restarting its pictures. A clock that ran by itself in CSS started over at the time
+  // of that answer, a second back at every repaint ("1m 23s", "1m 24s", "1m 23s"). A running clock is text the answer
+  // holds as drawn, and the mod draws the band again on each wall-clock second while one shows
+  async cc_repaint_never_steps_a_clock_back(E) {
+    await create(E)
+    await E.spawn('ag1', 'Scan tests')
+    await E.view('t')
+    E.tick(83_400)
+    const before = tickOf(E)
+    await E.fireTimers() // the beat just after the next wall-clock second
+    const isRedrawn = tickOf(E) !== before
+    const v = await E.view('t') // that redraw: the answer every later repaint shows again
+    const runsByItself = s => s.includes('--d:') || /animation:[^;}]*var\(--d\)/.test(s)
+    return [
+      `redrawn on the second ${isRedrawn}; strip reads ${clock(v.strips[0])}, pill ${clock(v.overlay)}; a clock running by itself ${runsByItself(v.strips[0] + v.overlay)}`,
+      isRedrawn && clock(v.strips[0]) === '1m 23s' && clock(v.overlay) === '1m 23s' && !runsByItself(v.strips[0] + v.overlay),
+    ]
+  },
+  // cc-mods: the beat draws the band again only while a running clock shows: a finished bar's time stands still
+  async cc_no_beat_without_a_running_clock(E) {
+    await create(E)
+    E.tick(5000)
+    await E.call({ id: 't', state: 'done' })
+    await E.view('t')
+    const before = tickOf(E)
+    E.tick(1000)
+    await E.fireTimers()
+    const isIdle = tickOf(E) === before
+    await create(E, 'u', three(), 'Other') // a running bar: its pill carries the time on hover
+    await E.view('u')
+    await E.fireTimers()
+    const isLive = tickOf(E) !== before
+    return [`done bar alone redrawn ${!isIdle}, with a running bar ${isLive}`, isIdle && isLive]
   },
   async strips_clock_live_then_static(E) {
     await create(E)
@@ -398,13 +443,42 @@ const C = {
     await E.turnComplete('ag2', 'error')
     const folded = await E.view('t')
     const btn = (await E.buttons()).find(b => b.key === 'agents-t')
-    const foldedOk = folded.strips.length === 2 && folded.strips[0].includes('Agent ag2') && folded.strips[1].includes('3 more agents · 3 running') && btn?.label === '▾ 4'
+    const foldedOk = folded.strips.length === 2 && folded.strips[0].includes('Agent ag2') && folded.strips[1].includes('3 more agents · 3 running') && btn?.label === '▾'
     await E.press('agents-t')
     const open = await E.view('t')
     const openOk = open.strips.length === 4 && (await E.buttons()).find(b => b.key === 'agents-t')?.label === '▴'
     await E.press('agents-t')
     const back = (await E.view('t')).strips.length === 2
     return [`lone ${loneOk}, folded ${folded.strips.length} rows (${btn?.label}), opened ${open.strips.length}, folded again ${back}`, loneOk && foldedOk && openOk && back]
+  },
+  // cc-mods: the ▾ sat after the title, read as a count and far from the rows it opens; it ends the bar's last agent
+  // row (the summary row while folded) in a column every strip leaves free, so no strip moves when it appears
+  async cc_fold_button_ends_the_last_agent_row(E) {
+    await create(E)
+    await E.spawn('ag1', 'Lone agent')
+    const widths = async () => nodes(await E.tree(), n => n.type === 'Svg' && String(n.props.key).startsWith('strip-t-')).map(n => n.props.width)
+    const lone = await widths()
+    for (const id of ['ag2', 'ag3']) await E.spawn(id, `Agent ${id}`)
+    const row = async () => {
+      const tree = await E.tree()
+      const fold = nodes(tree, n => n.type === 'Box' && n.props.key === 'fold-t')[0]
+      const strip = nodes(fold?.children ?? [], n => n.type === 'Svg')[0]?.props.key
+      const button = nodes(fold?.children ?? [], n => n.type === 'Button')[0]?.props.label
+      const bar = nodes(tree, n => n.type === 'Box' && n.props.key === 'bar-t')[0]
+      // the title row's own children, the track column apart
+      const besideTitle = (bar?.children ?? []).flat().some(n => n?.type === 'Button' && n.props.key === 'agents-t')
+      return { strip, button, besideTitle }
+    }
+    const folded = await row()
+    const foldedWidths = await widths()
+    await E.press('agents-t')
+    const open = await row()
+    const track = nodes(await E.tree(), n => n.type === 'Svg' && String(n.props.alt).startsWith('Task:'))[0]?.props.width
+    const isSteady = lone.length === 1 && foldedWidths.every(w => w === lone[0]) && lone[0] < track
+    return [
+      `folded: ${folded.button} after ${folded.strip}; opened: ${open.button} after ${open.strip}; by the title ${folded.besideTitle || open.besideTitle}; strips ${lone[0]}px → ${foldedWidths.join('/')}px, track ${track}px`,
+      folded.strip === 'strip-t-+' && folded.button === '▾' && open.strip === 'strip-t-ag3' && open.button === '▴' && !folded.besideTitle && !open.besideTitle && isSteady,
+    ]
   },
   // cc-mods: the agents button appearing with a second agent leaves the track width alone
   async cc_track_width_steady_when_button_appears(E) {
