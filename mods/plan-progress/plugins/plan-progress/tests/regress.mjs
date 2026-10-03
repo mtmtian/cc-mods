@@ -262,14 +262,57 @@ const C = {
   async same_bar_same_source_while_time_passes(E) {
     await create(E)
     await E.spawn('ag1', 'Scan tests')
-    // the still parts: the track picture and the strips (the hover layer is rebuilt every redraw by design)
-    const still = v => v.track + v.strips.join('')
+    // the still parts: the track picture and the strips, apart from the time their clocks start at, which every
+    // draw sets from now (the hover layer is rebuilt every redraw by design)
+    const still = v => (v.track + v.strips.join('')).replace(/--d:-[\d.]+s/g, '--d')
     const a = still(await E.view('t'))
     E.tick(7000)
     const b = still(await E.view('t'))
     await E.agentTool('ag1', 'Grep')
     const c = still(await E.view('t'))
     return [`idle redraw same ${a === b}, change redraws ${a !== c}`, a === b && a !== c]
+  },
+  // cc-mods: the desktop shows a strip's drawing afresh on later redraws, which restarts its CSS clock and one-shot
+  // morph. A strip whose word last changed at 1m 00s, drawn 30 s later with nothing changed, read "1m 00s" again with
+  // "Needs approval" blurring into "Bash" each time; every draw must start its clock at the time now and morph once
+  async cc_idle_strip_redraw_keeps_time_and_morphs_once(E) {
+    await create(E)
+    await E.spawn('ag1', 'Scan tests')
+    E.tick(59_000)
+    const held = await E.hold('ag1')
+    await E.fireTimers() // past the 600 ms wait: the strip reads "Needs approval"
+    await E.view('t')
+    E.tick(1000)
+    await E.agentTool('ag1', 'Bash') // the next call: the word goes back to the tool
+    await held.release()
+    const at = (await E.view('t')).strips[0] ?? ''
+    E.tick(30_000)
+    const later = (await E.view('t')).strips[0] ?? ''
+    const delay = s => s.match(/--d:-([\d.]+)s/)?.[1]
+    const isMorph = s => s.includes(' mo ') || s.includes('<animate ')
+    return [
+      `at the change: delay ${delay(at)}s, morph ${isMorph(at)}; 30 s later: delay ${delay(later)}s, morph ${isMorph(later)}`,
+      delay(at) === '60.0' && isMorph(at) && delay(later) === '90.0' && !isMorph(later),
+    ]
+  },
+  // cc-mods: the same for the track's head, which slides to a new step once and then stands; a finished bar's pill
+  // (its time) slid in again from mid-track each time the desktop showed the picture afresh
+  async cc_track_glides_once(E) {
+    await create(E)
+    await E.view('t')
+    await E.call({ id: 't', next: true })
+    const at = (await E.view('t')).track
+    E.tick(1000)
+    const later = (await E.view('t')).track
+    await E.call({ id: 't', state: 'done' })
+    const done = (await E.view('t')).track
+    E.tick(1000)
+    const doneLater = (await E.view('t')).track
+    const isGlide = s => s.includes('<animate attributeName="width"')
+    return [
+      `glide at the step ${isGlide(at)}, a second later ${isGlide(later)}; at done ${isGlide(done)}, a second later ${isGlide(doneLater)}`,
+      isGlide(at) && !isGlide(later) && isGlide(done) && !isGlide(doneLater),
+    ]
   },
   async running_pill_has_live_clock(E) {
     await create(E)
