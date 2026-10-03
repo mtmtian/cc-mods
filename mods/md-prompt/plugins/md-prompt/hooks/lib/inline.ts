@@ -281,7 +281,7 @@ export function paintInline(s: string, refs: Refs, codeOnly: boolean, emit: Emit
       if (!right && !prevWs && isCjk(next)) right = true
     }
     const canOpen = ch === UNDERSCORE ? left && (!right || prevP) : left
-    // `__tests__/` and `__pycache__/` are path segments: an `_` run right before a `/` does not close
+    // `__tests__/` and `__generated__/` are path segments: an `_` run right before a `/` does not close
     const canClose = ch === UNDERSCORE ? right && (!left || nextP) && next !== 47 : right
     // `2*3*4`, `x**2 + y**2` and `src/*.ts and lib/*.ts` are arithmetic and globs far more often than
     // emphasis, so a `*` / `~~` run between two ASCII word characters, or any run right after a `/`, only closes
