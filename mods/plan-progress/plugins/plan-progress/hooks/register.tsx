@@ -801,7 +801,7 @@ function stripCells(v: { shown: AgentRun[]; hidden: AgentRun[] }, W: number, now
     const indent = a.depth > 0 ? 2 : 0
     const dotColor = running ? mix(tint, c, 0.3 + 0.7 * q(wave(now, 1100))) : c
     g.text(2 + indent, y, '●', pack(dotColor), pack(tint))
-    const time = elapsed((a.endedAt ?? now) - a.startedAt)
+    const time = elapsed(runFor(a.startedAt, a.endedAt ?? now))
     const narrow = W < 30
     const tx = W - 2 - time.length
     // the tool word sits at the right, just before the time, so the name and its model get the rest of the row
@@ -1382,6 +1382,7 @@ export const register: Register = on => {
       const v = visibleAgents(p, now, budget, isExpanded)
       const track = trackSvg(p, trackW, now)
       const hover = draw(track.overlay)
+      const canFold = isFoldable(p)
       const strips = v && Svg
         ? stripsSvg(v, p.agents ?? [], stripW, now).map((r, j, rows) => {
             const strip = (
@@ -1393,7 +1394,7 @@ export const register: Register = on => {
                 height={r.height}
               />
             )
-            if (j < rows.length - 1 || !isFoldable(p)) return strip
+            if (j < rows.length - 1 || !canFold) return strip
             return (
               <Box key={`fold-${p.id}`} flexDirection="row" alignItems="flex-end">
                 {strip}
