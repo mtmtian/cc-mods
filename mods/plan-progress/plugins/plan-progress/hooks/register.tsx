@@ -156,10 +156,6 @@ function pointAt(stages: PlanStage[]): PlanStage[] {
   return stages.map(s => ({ ...s, steps: s.steps.map(st => (st === first ? { ...st, status: 'active' as const } : st)) }))
 }
 
-function st(title: string, s: StepStatus): PlanStep {
-  return { title, status: s, substeps: [] }
-}
-
 // ---------- drawing ----------
 
 type Where = { pos: number; total: number; stage: number; step: number; stageSize: number }
@@ -892,7 +888,8 @@ async function animate($: EngineInterface) {
   try {
     await Promise.all(
       live.flatMap(p => {
-        const v = visibleAgents(p, now, stripBudget(b.list.length))
+        // the terminal has no ▾ to open folded strips, so it shows all it has room for
+        const v = visibleAgents(p, now, stripBudget(b.list.length), true)
         const strips = v ? stripCells(v, b.W, now) : null
         const calls = [$.ui.blit({ requestId: b.requestId, key: `track-${p.id}`, cells: trackCells(p, b.W, now) })]
         if (strips) calls.push($.ui.blit({ requestId: b.requestId, key: `strips-${p.id}`, cells: strips.cells }))
@@ -1329,7 +1326,7 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           {list.map(p => {
-            const v = visibleAgents(p, now, stripBudget(list.length))
+            const v = visibleAgents(p, now, stripBudget(list.length), true)
             const strips = v ? stripCells(v, trackW, now) : null
             const w = where(p)
             const pct = p.state === 'done' ? 100 : Math.round((Math.min(w.pos, w.total) / Math.max(1, w.total)) * 100)

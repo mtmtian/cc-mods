@@ -568,6 +568,13 @@ const C = {
     const r = [await band(false), await band(true)]
     return [`band ${r[0]}/${r[1]}`, r.join() === '0,1']
   },
+  // cc-mods: folding is the desktop's (it has the ▾ button); the terminal has none, so it shows every strip it has room for
+  async cc_terminal_strips_do_not_fold(E) {
+    await create(E)
+    for (const id of ['ag1', 'ag2', 'ag3']) await E.spawn(id, `Agent ${id}`)
+    const strips = (await E.terminal(120)).find(n => n.type === 'Raster' && n.props.key === 'strips-t')
+    return [`terminal strip rows ${strips?.props.rows}`, strips?.props.rows === 3]
+  },
   async desktop_still_draws_svg(E) {
     await create(E)
     const svgs = await E.svgs()
