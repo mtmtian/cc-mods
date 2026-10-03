@@ -28,7 +28,7 @@ const TOGGLE_W = 32 // px the agents button (▾ 4 / ▴) takes after a title; r
 const STATE_COLOR: Record<PlanState, string> = { running: '#D97757', needs_input: '#2C84DB', error: '#B53333', done: '#2F7613' }
 const PILL_COLOR: Record<PlanState, string> = { running: '#B55C3E', needs_input: '#1B67B2', error: '#B53333', done: '#2F7613' }
 const INK = '#FFFFFF'
-const STATE_GLYPH: Record<PlanState, string> = { running: '●', needs_input: '?', error: '!', done: '✓' }
+const STATE_GLYPH: Record<PlanState, string> = { running: '●', needs_input: '?', error: '×', done: '✓' }
 const STATUSES: StepStatus[] = ['pending', 'active', 'done', 'error', 'skipped']
 const TRACK_H = 22
 const NARROW = 360
@@ -211,7 +211,7 @@ const ICON_PATH: Partial<Record<PlanState, string>> = {
 // has no images, keeps the coloured character
 const GLYPH_HUE: Record<PlanState, [string, string]> = {
   running: ['#D97757', '#C6613F'],
-  needs_input: ['#2C84DB', '#2C84DB'],
+  needs_input: ['#2C84DB', '#2C84DB'], // --accent-100 is the same blue in both themes
   error: ['#DD5353', '#B53333'],
   done: ['#459315', '#2F7613'],
 }
@@ -1093,7 +1093,7 @@ export const register: Register = on => {
     const total = Math.max(320, (e.props.bodyColumns || 100) * 8)
     // every bar has the same width and is pinned to the right edge (fixed-width percent, close button),
     // so rows line up whatever their titles; the slack goes into the gap after the title.
-    // Desktop reports ~8 CSS px per column; glyph, gaps, percent and the close button take ~126 px.
+    // Desktop reports ~8 CSS px per column; the 12 px glyph, gaps, percent and the close button take ~130 px.
     const titleWidth = Math.min(Math.round(total * 0.3), Math.max(...list.map(p => Math.round(textWidth(p.title, 6.4)))))
     await read($, tick)
     const now = await $.clock.now()
@@ -1142,7 +1142,7 @@ export const register: Register = on => {
             ...line,
             <Box key={`bar-${p.id}`} flexDirection="row" alignItems={v ? 'flex-start' : 'center'} gap={1}>
               {Svg ? (
-                <Svg key={`glyph-${p.id}`} source={GLYPH_SVG[p.state]} alt={p.state.replace('_', ' ')} width={12} height={20} />
+                <Svg key={`glyph-${p.id}`} source={GLYPH_SVG[p.state]} alt={p.state.replaceAll('_', ' ')} width={12} height={20} />
               ) : (
                 <Text color={color}>{STATE_GLYPH[p.state]}</Text>
               )}
