@@ -1,5 +1,13 @@
 // a stand-in engine around the real, compiled register.tsx: hooks run as written, only $ is faked
 globalThis.h = (type, props, ...children) => ({ type, props: props ?? {}, children })
+// cc-mods: the terminal Raster packs its cells with Uint8Array#toBase64, which the engine's Bun has and Node before 25 lacks
+if (!Uint8Array.prototype.toBase64) {
+  Object.defineProperty(Uint8Array.prototype, 'toBase64', {
+    value() {
+      return Buffer.from(this.buffer, this.byteOffset, this.byteLength).toString('base64')
+    },
+  })
+}
 
 export const TOOL = 'mcp__plan-progress__plan_progress'
 
@@ -15,6 +23,7 @@ export async function boot(file, kept = new Map()) {
   const every = []
   const sounds = []
   let toolSpec = null
+  const blits = []
   const $ = {
     __get(a) {
       return state.has(a.ref.key) ? state.get(a.ref.key) : a.initial
@@ -24,7 +33,12 @@ export async function boot(file, kept = new Map()) {
       state.set(a.ref.key, v)
       return v
     },
-    clock: { now: async () => now, after: (ms, cb) => void timers.push({ at: now + ms, cb }), every: (ms, cb) => void every.push(cb) },
+    clock: { now: async () => now, after: (ms, cb) => void timers.push({ at: now + ms, cb }), every: (ms, cb) => {
+        const t = { ms, cb, isOn: true }
+        every.push(t)
+        return { cancel: () => void (t.isOn = false) }
+      },
+    },
     // the plugin's store outlives a boot when the caller passes the same map, as it outlives a restart
     store: {
       get: async k => (kept.has(k) ? JSON.parse(kept.get(k)) : undefined),
@@ -38,7 +52,15 @@ export async function boot(file, kept = new Map()) {
     plugin: { root: '/plugin' },
     tool: { register: async spec => void (toolSpec = spec) },
     command: { register: async () => {} },
-    ui: { resolve: () => ({ Box: 'Box', Button: 'Button', Text: 'Text', Svg: 'Svg' }), toast: () => {} },
+    config: { list: async () => [] },
+    ui: {
+      resolve: e => (e?.surface === 'terminal' ? { Box: 'Box', Button: 'Button', Text: 'Text', Raster: 'Raster' } : { Box: 'Box', Button: 'Button', Text: 'Text', Svg: 'Svg' }),
+      toast: () => {},
+      blit: async args => {
+        blits.push(args)
+        return {}
+      },
+    },
   }
   const matches = (m, e) => !m || Object.entries(m).every(([k, v]) => e[k] === v)
   const dispatch = (event, e, core) => {
@@ -53,14 +75,17 @@ export async function boot(file, kept = new Map()) {
   const api = {
     $,
     sounds,
+    blits,
     coreRuns,
     get toolSpec() {
       return toolSpec
     },
     tick: ms => (now += ms),
+    // one period of every live timer; a timer started during the pass waits for the next one
     everyTick: async () => {
-      for (const cb of every) await cb()
+      for (const t of [...every]) if (t.isOn) await t.cb()
     },
+    frameTimers: () => every.filter(t => t.isOn && t.ms < 100).length,
     fireTimers: async () => {
       for (const t of timers.splice(0)) await t.cb()
     },
@@ -74,10 +99,10 @@ export async function boot(file, kept = new Map()) {
     spawn: (agentId, description, parentAgentId) => dispatch('agent.spawn', { description, subagentType: 'general-purpose', parentAgentId }, () => ({ agentId, model: 'claude-haiku-4-5-20251001' })),
     step: (agentId, effort) => (async () => { const g = hooks.find(h => h.event === 'turn.step').fn($, { agentId, model: 'claude-haiku-4-5-20251001', effort, turnId: 't', index: 0, messageCount: 1 }, async function* () {}); for await (const _ of g); })(),
     agentTool: (agentId, tool) => dispatch('tool.call', { tool, agentId, tool_use_id: uid() }, () => ({ result: {} })),
-    // an agent's call held on a permission prompt: the check says ask and the call stays open past the mod's 600 ms wait
     // the engine's notice that a permission dialog has waited on the person (6 s on the desktop) or another kind of notice
     notify: (notification_type, agentId) =>
       dispatch('classic.Notification', { notification_type, message: 'Claude needs your permission to use Bash', ...(agentId ? { agent_id: agentId } : {}) }, () => ({})),
+    // an agent's call held on a permission prompt: the check says ask and the call stays open past the mod's 600 ms wait
     approval: agentId => {
       const id = uid()
       return dispatch('tool.call', { tool: 'Bash', agentId, tool_use_id: id }, async () => {
@@ -88,6 +113,25 @@ export async function boot(file, kept = new Map()) {
     },
     turnComplete: (agentId, reason = 'answer') => dispatch('turn.complete', { agentId, reason }, () => ({})),
     turnStart: () => dispatch('turn.start', {}, () => ({})),
+    // a question from the main loop, or from a subagent's loop when agentId is given
+    ask: agentId => dispatch('tool.call', { tool: 'AskUserQuestion', agentId, tool_use_id: uid() }, () => ({ result: {} })),
+    // an agent's call held for approval: the permission check answers "ask" and the call stays open until release()
+    hold: async agentId => {
+      const id = uid()
+      let release
+      const held = new Promise(r => (release = r))
+      let checked
+      const asked = new Promise(r => (checked = r))
+      const call = dispatch('tool.call', { tool: 'Bash', agentId, tool_use_id: id }, async () => {
+        await dispatch('tool.check', { tool: 'Bash', tool_use_id: id }, () => ({ decision: 'ask' }))
+        checked()
+        await held
+        return { result: {} }
+      })
+      await asked
+      return { release: async () => (release(), call) }
+    },
+    command: name => dispatch('command.run', { command: name, args: '' }, () => ({})),
     sessionStart: () => dispatch('session.start', {}, () => ({})),
     stop: (msg = 'Done.') => dispatch('classic.Stop', { stop_hook_active: false, last_assistant_message: msg, background_tasks: [] }, () => ({})),
     plans: () => $.__get({ ref: { key: 'plans' }, initial: [] }),
@@ -103,6 +147,18 @@ export async function boot(file, kept = new Map()) {
         if (Array.isArray(n)) return n.forEach(walk)
         if (!n || typeof n !== 'object') return
         if (n.type === 'Svg') found.push(n.props)
+        ;(n.children ?? []).forEach(walk)
+      }
+      walk(tree)
+      return found
+    },
+    terminal: async (cols = 120, isFullscreen = false) => {
+      const tree = await dispatch('ui.render', { component: 'AbovePrompt', surface: 'terminal', requestId: 'band', viewport: { columns: cols, rows: 40, isFullscreen }, props: { bodyColumns: cols, hasSurvey: false } }, () => null)
+      const found = []
+      const walk = n => {
+        if (Array.isArray(n)) return n.forEach(walk)
+        if (!n || typeof n !== 'object') return
+        found.push(n)
         ;(n.children ?? []).forEach(walk)
       }
       walk(tree)

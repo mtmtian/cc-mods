@@ -160,22 +160,6 @@ function st(title: string, s: StepStatus): PlanStep {
   return { title, status: s, substeps: [] }
 }
 
-const DEMO = (now: number): Plan => ({
-  id: 'demo',
-  title: 'Orders module',
-  kind: 'plan',
-  state: 'running',
-  note: null,
-  startedAt: now - 260_000,
-  stages: [
-    { name: 'Analysis', steps: [st('Read modules', 'done'), st('Find dependencies', 'done'), st('List changes', 'done')] },
-    { name: 'DB migration', steps: [st('Table schema', 'done'), st('Create migration', 'done'), st('Move data', 'active'), st('Indexes', 'pending')] },
-    { name: 'API', steps: [st('Endpoints', 'pending'), st('Validation', 'pending'), st('Access rules', 'pending')] },
-    { name: 'Interface', steps: [st('List page', 'pending'), st('Order card', 'pending'), st('Filters', 'pending'), st('Empty states', 'pending')] },
-    { name: 'Verify', steps: [st('Tests', 'pending'), st('Build', 'pending')] },
-  ],
-})
-
 // ---------- drawing ----------
 
 type Where = { pos: number; total: number; stage: number; step: number; stageSize: number }
@@ -586,27 +570,29 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
     }
     // a still texture: the pulsing state dot already says the agent is live
     const px = [...dots].map(([, d]) => `<path fill="${c}" fill-opacity=".32" d="${d}"/>`).join('')
-    const nameRoom = isNarrow ? SW - 24 - indent : SW * 0.5
-    const spec = [a.model ? modelName(a.model) : '', a.effort ?? ''].filter(Boolean).join(' · ')
-    const full = (a.depth > 0 ? '↳ ' : '') + a.title + (spec ? ` (${spec})` : '')
-    let name = full
-    while (name.length > 4 && textWidth(name, 6.2) > nameRoom) name = name.slice(0, -1)
-    if (name !== full) name = name.trimEnd() + '…'
-    const nameX = GUTTER + 19 + indent
-    const toolX = nameX + textWidth(name, 6.2) + 8
-    const time =
-      a.endedAt === null
-        ? liveClock(W - 9 - CLOCK_W, y, a.startedAt, 'sc', 'sn st')
-        : `<text x="${W - 9}" y="${y + 11.5}" text-anchor="end" class="sn st">${elapsed(a.endedAt - a.startedAt)}</text>`
     // a status change: the old word blurs out while the new one blurs in, and the tint flows to the new colour
     const was = lastStrip.get(a.id)
     lastStrip.set(a.id, { tool: word, color: c })
     const isWordChanged = was !== undefined && was.tool !== word
     const flow = (attr: string) => (was && was.color !== c ? `<animate attributeName="${attr}" from="${was.color}" to="${c}" dur="${MORPH}" fill="freeze"/>` : '')
+    // the tool word sits at the right, just before the clock, so the name and its model get the rest of the row
+    const toolEnd = W - 9 - CLOCK_W - 10
+    const wordW = Math.max(word ? textWidth(word, 6.2) : 0, isWordChanged && was.tool ? textWidth(was.tool, 6.2) : 0)
+    const nameX = GUTTER + 19 + indent
+    const nameRoom = isNarrow ? SW - 24 - indent : toolEnd - (wordW > 0 ? wordW + 12 : 0) - nameX
+    const spec = [a.model ? modelName(a.model) : '', a.effort ?? ''].filter(Boolean).join(' · ')
+    const full = (a.depth > 0 ? '↳ ' : '') + a.title + (spec ? ` (${spec})` : '')
+    let name = full
+    while (name.length > 4 && textWidth(name, 6.2) > nameRoom) name = name.slice(0, -1)
+    if (name !== full) name = name.trimEnd() + '…'
+    const time =
+      a.endedAt === null
+        ? liveClock(W - 9 - CLOCK_W, y, a.startedAt, 'sc', 'sn st')
+        : `<text x="${W - 9}" y="${y + 11.5}" text-anchor="end" class="sn st">${elapsed(a.endedAt - a.startedAt)}</text>`
     const tool = isNarrow
       ? ''
-      : (isWordChanged && was.tool ? `<text x="${toolX}" y="${y + 11.5}" class="sn mo ${WORD_CLASS[was.color] ?? ''}">${esc(was.tool)}</text>` : '') +
-        (word ? `<text x="${toolX}" y="${y + 11.5}" class="sn${isWordChanged ? ' mi' : ''} ${WORD_CLASS[c] ?? ''}">${esc(word)}</text>` : '') +
+      : (isWordChanged && was.tool ? `<text x="${toolEnd}" y="${y + 11.5}" text-anchor="end" class="sn mo ${WORD_CLASS[was.color] ?? ''}">${esc(was.tool)}</text>` : '') +
+        (word ? `<text x="${toolEnd}" y="${y + 11.5}" text-anchor="end" class="sn${isWordChanged ? ' mi' : ''} ${WORD_CLASS[c] ?? ''}">${esc(word)}</text>` : '') +
         time
     const html =
       gutter(y, String(all.indexOf(a) + 1)) +
@@ -649,6 +635,275 @@ ${CLOCK_CSS}
 function plural(n: number, word: string) {
   return `${n} ${word}${n === 1 ? '' : 's'}`
 }
+
+const DEFAULT = 0x01000000
+let isLight = false
+const termBg = () => (isLight ? [255, 255, 255] : [24, 24, 27])
+const termFg = () => (isLight ? [34, 34, 38] : [240, 238, 252])
+const pack = (c: number[]) => ((c[0] ?? 0) << 16) | ((c[1] ?? 0) << 8) | (c[2] ?? 0)
+const isWide = (cp: number) => cp > 0xffff || (cp >= 0x1100 && cp <= 0x115f) || (cp >= 0x2e80 && cp <= 0xa4cf) || (cp >= 0xac00 && cp <= 0xd7a3) || (cp >= 0xf900 && cp <= 0xfaff) || (cp >= 0xfe30 && cp <= 0xfe4f) || (cp >= 0xff00 && cp <= 0xff60) || (cp >= 0xffe0 && cp <= 0xffe6)
+const cellText = (s: string) => [...s].map(ch => (isWide(ch.codePointAt(0) ?? 63) || (ch.codePointAt(0) ?? 0) < 32 ? '·' : ch)).join('')
+const cellsOf = (s: string) => [...s].reduce((w, ch) => w + (isWide(ch.codePointAt(0) ?? 0) ? 2 : 1), 0)
+const fit = (s: string, w: number) => {
+  const chars = [...cellText(s)]
+  if (chars.length <= w) return chars.join('')
+  return w <= 1 ? '…'.slice(0, w) : chars.slice(0, w - 1).join('').trimEnd() + '…'
+}
+
+type Cell = [number, number, number]
+
+class Grid {
+  cells: Cell[]
+  constructor(
+    readonly columns: number,
+    readonly rows: number,
+  ) {
+    this.cells = Array.from({ length: columns * rows }, () => [32, DEFAULT, DEFAULT] as Cell)
+  }
+  set(x: number, y: number, ch: string | number, fg: number, bg: number) {
+    if (x < 0 || x >= this.columns || y < 0 || y >= this.rows) return
+    this.cells[y * this.columns + x] = [typeof ch === 'number' ? ch : (ch.codePointAt(0) ?? 32), fg, bg]
+  }
+  bg(x: number, y: number) {
+    return this.cells[y * this.columns + x]?.[2] ?? DEFAULT
+  }
+  text(x: number, y: number, s: string, fg: number, bg?: number) {
+    let i = 0
+    for (const ch of cellText(s)) {
+      this.set(x + i, y, ch, fg, bg ?? this.bg(x + i, y))
+      i++
+    }
+    return i
+  }
+  encode() {
+    const words = new Uint32Array(this.cells.length * 3)
+    this.cells.forEach((c, i) => words.set(c, i * 3))
+    return (new Uint8Array(words.buffer) as Uint8Array & { toBase64: () => string }).toBase64()
+  }
+}
+
+const BRAILLE_BITS = [
+  [0x01, 0x08],
+  [0x02, 0x10],
+  [0x04, 0x20],
+  [0x40, 0x80],
+]
+
+function pill(g: Grid, y: number, from: number, to: number, bgAt: (x: number) => number[]) {
+  for (let x = from; x < to; x++) g.set(x, y, ' ', DEFAULT, pack(bgAt(x)))
+}
+
+const LEVELS = 8
+const q = (m: number) => Math.round(Math.max(0, Math.min(1, m)) * LEVELS) / LEVELS
+const wave = (t: number, periodMs: number, offset = 0) => 0.5 + 0.5 * Math.sin(((t / periodMs) + offset) * Math.PI * 2)
+const easeOut = (x: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, x)), 4)
+
+const glide = new Map<string, { from: number; to: number; at: number }>()
+const GLIDE_MS = 450
+
+function headAt(id: string, target: number, t: number): number {
+  const g = glide.get(id)
+  if (!g) {
+    glide.set(id, { from: target, to: target, at: t })
+    return target
+  }
+  const cur = g.from + (g.to - g.from) * easeOut((t - g.at) / GLIDE_MS)
+  if (Math.abs(g.to - target) > 0.01) {
+    glide.set(id, { from: cur, to: target, at: t })
+    return cur
+  }
+  return cur
+}
+
+
+function trackCells(p: Plan, W: number, t: number): string {
+  const g = new Grid(W, 1)
+  const w = where(p)
+  const done = p.state === 'done'
+  const target = (done ? 1 : Math.min(1, w.pos / Math.max(1, w.total))) * W
+  const fx = headAt(p.id, target, t)
+  const back = termBg()
+  const acc = hex(STATE_COLOR[p.state])
+  const light = mix(acc, [255, 255, 255], 0.35)
+  const grey = [120, 118, 128]
+  const track = mix(back, [128, 128, 128], isLight ? 0.14 : 0.18)
+  const fill = mix(track, acc, done ? 0.3 : 0.17)
+  const under = (x: number) => (x + 0.5 < fx ? fill : track)
+  pill(g, 0, 0, W, under)
+
+  const TWINKLE = done ? [3200, 3800, 4400, 3500] : [2200, 2800, 1900, 3300]
+  const DELAY = [0, 700, 1300, 400]
+  const dim = done ? 0.2 : 0.55
+  for (let col = 0; col < Math.min(W, Math.ceil(fx)); col++) {
+    const u = Math.min(1, (col + 0.5) / Math.max(1, fx))
+    const dense = done ? 0.8 : 0.22 + 0.78 * Math.pow(u, 1.5)
+    let bits = 0
+    for (let r = 0; r < 4; r++) {
+      for (let c = 0; c < 2; c++) {
+        const sx = col * 2 + c
+        if (sx / 2 >= fx || hash(sx, r, 1) > dense * 0.6) continue
+        bits |= BRAILLE_BITS[r]?.[c] ?? 0
+      }
+    }
+    if (bits === 0) continue
+    const cls = Math.floor(hash(col, 0, 2) * 4)
+    const period = TWINKLE[cls] ?? 2200
+    const blink = 1 - dim * wave(t + (DELAY[cls] ?? 0), period, 0.25)
+    const bucket = done ? 1 : q(Math.min(1, Math.pow(u, 0.9) * 1.1))
+    const tone = mix(grey, light, bucket)
+    const opacity = (0.35 + 0.65 * dense) * blink
+    g.set(col, 0, 0x2800 + bits, pack(mix(fill, tone, q(opacity))), pack(fill))
+  }
+
+  let k = 0
+  p.stages.forEach(s => {
+    if (k > 0) {
+      const x = Math.round((k / w.total) * W)
+      if (x > 0 && x < W - 1) {
+        const passed = x < fx - 0.5
+        g.set(x, 0, '│', pack(passed ? mix(light, [255, 255, 255], 0.5) : mix(track, isLight ? [0, 0, 0] : [255, 255, 255], 0.3)), pack(under(x)))
+      }
+    }
+    k += s.steps.length
+  })
+
+  const base = hex(STATE_COLOR[p.state])
+  const color = base
+  const single = p.stages.length === 1
+  const number = single ? Math.min(w.total, w.pos + 1) : w.stage + 1
+  const icon = p.state === 'done' ? '✓' : p.state === 'error' ? '✕' : p.state === 'needs_input' ? '?' : ''
+  let name = ''
+  let count = ''
+  if (W < 28) {
+    name = icon || String(number)
+  } else {
+    const agents = p.agents ?? []
+    name = done ? 'Done' : single ? (p.stages[0]?.name ?? 'Tasks') : (p.stages[w.stage]?.name ?? '')
+    const baseCount = p.id === AGENTS ? `${w.pos}/${w.total}` : done ? `${w.total}/${w.total}` : single ? `${number}/${w.total}` : `${w.step}/${w.stageSize}`
+    count = baseCount + (agents.length > 0 && p.id !== AGENTS ? ` · ${agents.filter(a => a.state === 'done').length}/${agents.length}` : '')
+  }
+  const lead = icon && W >= 28 ? `${icon} ` : ''
+  const maxName = Math.max(3, Math.floor(W * (W < 60 ? 0.75 : 0.55)) - cellsOf(lead) - cellsOf(count) - 5)
+  const shown = lead + fit(name, maxName)
+  const kw = cellsOf(shown) + (count ? count.length + 1 : 0) + 2
+  const kx = Math.round(Math.max(0, Math.min(W - kw, fx - kw / 2)))
+  const white = pack([255, 255, 255])
+  pill(g, 0, kx, kx + kw, () => color)
+  let at = kx + 1
+  at += g.text(at, 0, shown, white, pack(color))
+  if (count) g.text(at + 1, 0, count, pack(mix([255, 255, 255], color, 0.3)), pack(color))
+  return g.encode()
+}
+
+function stripCells(v: { shown: AgentRun[]; hidden: AgentRun[] }, W: number, now: number): { cells: string; rows: number } {
+  const rows = v.shown.length + (v.hidden.length > 0 ? 1 : 0)
+  const g = new Grid(W, rows)
+  const back = termBg()
+  const text = pack(termFg())
+  v.shown.forEach((a, y) => {
+    const c = hex(AGENT_COLOR[a.state])
+    const tint = mix(back, c, 0.18)
+    pill(g, y, 0, W, () => tint)
+    const running = a.state === 'running' || a.state === 'waiting'
+    if (running) {
+      for (let col = 1; col < W - 1; col++) {
+        let bits = 0
+        let glow = 0
+        for (let r = 0; r < 4; r++) {
+          for (let cc = 0; cc < 2; cc++) {
+            const sx = col * 2 + cc + y * 83
+            if (hash(sx, r, 5) >= 0.08) continue
+            const b = 1 - 0.55 * wave(now, 1900 + hash(sx, r, 6) * 1400, hash(sx, r, 7))
+            bits |= BRAILLE_BITS[r]?.[cc] ?? 0
+            glow = Math.max(glow, b)
+          }
+        }
+        if (bits) g.set(col, y, 0x2800 + bits, pack(mix(tint, c, 0.2 + 0.4 * q(glow))), pack(tint))
+      }
+    }
+    const indent = a.depth > 0 ? 2 : 0
+    const dotColor = running ? mix(tint, c, 0.3 + 0.7 * q(wave(now, 1100))) : c
+    g.text(2 + indent, y, '●', pack(dotColor), pack(tint))
+    const time = elapsed((a.endedAt ?? now) - a.startedAt)
+    const narrow = W < 30
+    const tx = W - 2 - time.length
+    // the tool word sits at the right, just before the time, so the name and its model get the rest of the row
+    const word = narrow || !running ? '' : fit(a.tool, Math.max(0, Math.floor(W * 0.25)))
+    const toolAt = tx - 1 - word.length
+    let at = 4 + indent
+    const spec = [a.model ? modelName(a.model) : '', a.effort ?? ''].filter(Boolean).join(' · ')
+    const full = (a.depth > 0 ? '↳ ' : '') + a.title + (spec ? ` (${spec})` : '')
+    const name = fit(full, Math.max(3, (narrow ? W - 2 : word ? toolAt - 1 : tx - 1) - at))
+    // the model and effort are drawn dimmer than the name
+    const cut = spec ? name.indexOf(' (') : -1
+    const head = cut > 0 ? name.slice(0, cut) : name
+    for (let i = -1; i < name.length + 1 && at + i < W - 1; i++) g.set(at + i, y, ' ', DEFAULT, pack(tint))
+    at += g.text(at, y, head, text, pack(tint))
+    if (head !== name) g.text(at, y, name.slice(head.length), pack(mix(termFg(), tint, 0.4)), pack(tint))
+    if (narrow) return
+    if (word) {
+      for (let i = -1; i <= word.length; i++) g.set(toolAt + i, y, ' ', DEFAULT, pack(tint))
+      g.text(toolAt, y, word, pack(c), pack(tint))
+    }
+    for (let i = -1; i < time.length; i++) g.set(tx + i, y, ' ', DEFAULT, pack(tint))
+    g.text(tx, y, time, pack(mix(termFg(), tint, 0.35)), pack(tint))
+  })
+  if (v.hidden.length > 0) {
+    const y = v.shown.length
+    const tint = mix(back, [128, 128, 128], 0.16)
+    pill(g, y, 0, W, () => tint)
+    const doneCount = v.hidden.filter(a => a.state === 'done').length
+    g.text(2, y, fit(`+${plural(v.hidden.length, 'more agent')} · ${doneCount} done`, W - 4), pack(mix(termFg(), tint, 0.35)), pack(tint))
+  }
+  return { cells: g.encode(), rows }
+}
+
+type Band = { requestId: string; W: number; list: readonly Plan[] }
+let band: Band | null = null
+let isFrameBusy = false
+// a bar twinkles only while Claude works on it; one waiting on the person or left open after the turn stands still
+let isTurnLive = false
+let frames: { cancel: () => void } | null = null
+
+const hasRunningAgents = (p: Plan) => (p.agents ?? []).some(a => a.state === 'running' || a.state === 'waiting')
+const isGliding = (p: Plan, t: number) => {
+  const g = glide.get(p.id)
+  return g !== undefined && g.from !== g.to && t - g.at < GLIDE_MS + 100
+}
+const isAnimated = (p: Plan, t: number) => (isTurnLive && p.state === 'running') || hasRunningAgents(p) || isGliding(p, t)
+
+// the 30 fps clock runs only while a terminal band has something moving; the second timer starts and stops it
+function syncFrames($: EngineInterface, now: number) {
+  const isWanted = band !== null && band.list.some(p => isAnimated(p, now))
+  if (isWanted && !frames) frames = $.clock.every(33, () => void animate($))
+  if (!isWanted && frames) {
+    frames.cancel()
+    frames = null
+  }
+}
+
+async function animate($: EngineInterface) {
+  const b = band
+  if (!b || isFrameBusy) return
+  const now = await $.clock.now()
+  const live = b.list.filter(p => isAnimated(p, now))
+  if (live.length === 0) return
+  isFrameBusy = true
+  try {
+    await Promise.all(
+      live.flatMap(p => {
+        const v = visibleAgents(p, now, stripBudget(b.list.length))
+        const strips = v ? stripCells(v, b.W, now) : null
+        const calls = [$.ui.blit({ requestId: b.requestId, key: `track-${p.id}`, cells: trackCells(p, b.W, now) })]
+        if (strips) calls.push($.ui.blit({ requestId: b.requestId, key: `strips-${p.id}`, cells: strips.cells }))
+        return calls.map(c => c.catch(() => undefined))
+      }),
+    )
+  } finally {
+    isFrameBusy = false
+  }
+}
+
 
 // ---------- engine glue ----------
 
@@ -705,7 +960,7 @@ async function putPlan($: EngineInterface, next: Plan) {
 
 // builds a bar from the latest stored one inside update(), so back-to-back calls never work from a stale copy;
 // make returns a string to refuse, and the list stays as it was
-async function editPlan($: EngineInterface, id: string, make: (prev: Plan | null) => Plan | string): Promise<Plan | string> {
+async function editPlan($: EngineInterface, id: string, make: (prev: Plan | null) => Plan | string, isQuiet = false): Promise<Plan | string> {
   let prev: Plan | undefined
   let made = '' as Plan | string
   await update($, plans, list => {
@@ -714,7 +969,7 @@ async function editPlan($: EngineInterface, id: string, make: (prev: Plan | null
     return typeof made === 'string' ? [...list] : placeBar(list, made)
   })
   if (typeof made === 'string') return made
-  chime($, prev?.state, made.state)
+  if (!isQuiet) chime($, prev?.state, made.state)
   if (!prev) await update($, isOpen, () => true)
   return made
 }
@@ -757,7 +1012,7 @@ function addRun(p: Plan, run: AgentRun, parentId: string | undefined, now: numbe
   return syncAuto({ ...p, agents: list, agentsDoneAt: null }, now)
 }
 
-// changes one agent's strip inside the latest list; silent: a prompt sounds through the engine's notification
+// changes one agent's strip inside the latest list; silent: a subagent answers to Claude, and a prompt put to the person sounds through the engine's notification
 async function editAgent($: EngineInterface, agentId: string, change: (a: AgentRun) => AgentRun) {
   const home = agentHome.get(agentId)
   if (!home) return
@@ -781,6 +1036,7 @@ function forgetGone(list: readonly Plan[]) {
   const live = new Set(list.flatMap(p => (p.agents ?? []).filter(a => a.state === 'running' || a.state === 'waiting').map(a => a.id)))
   const shown = new Set(list.flatMap(p => (p.agents ?? []).map(a => a.id)))
   for (const id of lastHead.keys()) if (!bars.has(id)) lastHead.delete(id)
+  for (const id of glide.keys()) if (!bars.has(id)) glide.delete(id)
   for (const id of lastSource.keys()) {
     const [bar, strip] = id.split('/')
     if (!bars.has(bar ?? '') || (strip !== undefined && strip !== '+' && !shown.has(strip))) lastSource.delete(id)
@@ -795,6 +1051,7 @@ function forgetGone(list: readonly Plan[]) {
 
 async function dropPlan($: EngineInterface, id: string) {
   lastHead.delete(id)
+  glide.delete(id)
   for (const p of await read($, plans)) if (p.id === id) for (const a of p.agents ?? []) lastStrip.delete(a.id)
   await update($, plans, list => list.filter(p => p.id !== id))
 }
@@ -853,6 +1110,7 @@ export const register: Register = on => {
   let isWaitingOnBackground = false
 
   on('turn.start', async ($, e, next) => {
+    isTurnLive = true
     workCalls = 0
     sinceUpdate = 0
     isPlanTouched = false
@@ -976,6 +1234,8 @@ export const register: Register = on => {
     })
     // a session reopened later (an app restart, a resume) finds its bars where it left them
     if ((await read($, plans)).length === 0) await restorePlans($)
+    const theme = (await $.config.list().catch(() => [])).find(row => row.key === 'theme')
+    isLight = /light/i.test(String(theme?.value ?? ''))
     $.clock.every(1000, async () => {
       const now = await $.clock.now()
       // a finished bar goes away on its own after a while; a failed one stays until the person closes it
@@ -985,6 +1245,7 @@ export const register: Register = on => {
       forgetGone(list)
       const isGone = (id: string) => !list.some(p => p.id === id)
       if ((await read($, expanded)).some(isGone)) await update($, expanded, ids => ids.filter(id => !isGone(id)))
+      syncFrames($, await $.clock.now())
       if (list !== lastSaved) await savePlans($, list)
       // clocks count inside the frame, so the only timed redraw is folding finished strips away
       if (foldUntil === 0 || now < foldUntil) return
@@ -992,8 +1253,6 @@ export const register: Register = on => {
       if (await read($, isOpen)) await update($, tick, n => n + 1)
     })
     await $.command.register({ name: 'progress', description: 'Show or hide the progress bars' })
-    await $.command.register({ name: 'progress-demo', description: 'Show a sample plan in the progress bars' })
-    await $.command.register({ name: 'progress-sounds', description: 'Play the decision, error and done sounds' })
     await $.command.register({ name: 'progress-clear', description: 'Remove all progress bars' })
 
     return next(e)
@@ -1003,10 +1262,15 @@ export const register: Register = on => {
     const raw = e as unknown as Raw
     const now = await $.clock.now()
     const id = slug(str(raw.id, 60) || str(raw.title, 80))
-    const next = await editPlan($, id, prev => {
-      const made = normalize(raw, prev, now, id)
-      return typeof made !== 'string' && made.stages.length === 0 ? `plan_progress: no bar "${id}" yet; create it with title and stages.` : made
-    })
+    const next = await editPlan(
+      $,
+      id,
+      prev => {
+        const made = normalize(raw, prev, now, id)
+        return typeof made !== 'string' && made.stages.length === 0 ? `plan_progress: no bar "${id}" yet; create it with title and stages.` : made
+      },
+      Boolean(e.agentId),
+    )
     if (typeof next === 'string') return { deny: next }
     isPlanTouched = true
     sinceUpdate = 0
@@ -1021,6 +1285,8 @@ export const register: Register = on => {
   })
 
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
+    // a subagent's question goes to Claude, not to the person: no sound, no waiting bar
+    if (e.agentId) return next(e)
     const live = (await read($, plans)).filter(p => p.state === 'running').pop()
     if (live) await update($, plans, list => list.map(p => (p.id === live.id ? { ...p, state: 'needs_input' as const } : p)))
     play($, 'decision')
@@ -1031,37 +1297,69 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'progress' }, async $ => {
-    if ((await read($, plans)).length === 0) return { text: 'No plan yet. /progress-demo shows a sample.' }
+    if ((await read($, plans)).length === 0) return { text: 'No plan yet. A bar appears when Claude starts a task with several steps.' }
     const open = await read($, isOpen)
     await update($, isOpen, () => !open)
 
     return { text: open ? 'Progress bars hidden.' : 'Progress bars shown.' }
   })
 
-  on('command.run', { command: 'progress-demo' }, async $ => {
-    await putPlan($, DEMO(await $.clock.now()))
-    await update($, isOpen, () => true)
-
-    return { text: 'Sample plan shown above the prompt.' }
-  })
-
   on('command.run', { command: 'progress-clear' }, async $ => {
+    glide.clear()
     await update($, plans, () => [])
 
     return { text: 'Progress bars removed.' }
   })
 
-  on('command.run', { command: 'progress-sounds' }, async $ => {
-    play($, 'decision')
-    $.clock.after(900, () => play($, 'error'))
-    $.clock.after(1800, () => play($, 'done'))
-
-    return { text: 'Sounds: decision, error, done.' }
-  })
-
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const list = await read($, plans)
-    if (list.length === 0 || e.props.hasSurvey || !(await read($, isOpen))) return next(e)
+    if (list.length === 0 || e.props.hasSurvey || !(await read($, isOpen))) {
+      band = null
+      return next(e)
+    }
+    if (e.surface === 'terminal') {
+      const { Box, Button, Text, Raster } = $.ui.resolve(e)
+      await read($, tick)
+      const now = await $.clock.now()
+      const cols = Math.max(30, e.props.bodyColumns || 100)
+      const hasClicks = e.viewport?.isFullscreen === true
+      const titleW = Math.max(4, Math.min(Math.round(cols * 0.28), Math.max(...list.map(p => cellsOf(p.title)))))
+      const trackW = Math.max(12, Math.min(512, cols - titleW - (hasClicks ? 15 : 13)))
+      band = { requestId: e.requestId, W: trackW, list }
+      return (
+        <Box flexDirection="column">
+          {list.map(p => {
+            const v = visibleAgents(p, now, stripBudget(list.length))
+            const strips = v ? stripCells(v, trackW, now) : null
+            const w = where(p)
+            const pct = p.state === 'done' ? 100 : Math.round((Math.min(w.pos, w.total) / Math.max(1, w.total)) * 100)
+            return (
+              <Box key={`bar-${p.id}`} flexDirection="column">
+                <Box flexDirection="row" gap={1}>
+                  <Text color={STATE_COLOR[p.state]}>{STATE_GLYPH[p.state]}</Text>
+                  <Box width={titleW} flexShrink={0}>
+                    <Text wrap="truncate">{p.title}</Text>
+                  </Box>
+                  <Raster key={`track-${p.id}`} columns={trackW} rows={1} cells={trackCells(p, trackW, now)} />
+                  <Text dimColor>{`${String(pct).padStart(3, FIGURE_SPACE)}%`}</Text>
+                  {hasClicks ? <Button key={`close-${p.id}`} plain dimColor label="✕" onPress={() => dropPlan($, p.id)} /> : null}
+                </Box>
+                {p.note && p.state !== 'running' ? (
+                  <Box marginLeft={titleW + 3}>
+                    <Text color={STATE_COLOR[p.state]} wrap="truncate">{p.note}</Text>
+                  </Box>
+                ) : null}
+                {strips ? (
+                  <Box marginLeft={titleW + 3}>
+                    <Raster key={`strips-${p.id}`} columns={trackW} rows={strips.rows} cells={strips.cells} />
+                  </Box>
+                ) : null}
+              </Box>
+            )
+          })}
+        </Box>
+      )
+    }
     const t = $.ui.resolve(e)
     const { Box, Button, Text } = t
     const Svg = 'Svg' in t ? t.Svg : null
@@ -1221,6 +1519,7 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     const agentId = e.agentId
+    if (!agentId) isTurnLive = false
     if (agentId && agentHome.has(agentId)) {
       const now = await $.clock.now()
       const isFailed = e.reason !== 'answer'

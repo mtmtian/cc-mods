@@ -5,6 +5,12 @@ const file = process.argv[2] ?? './register.mjs'
 const three = () => [S('One', st('A', 'active'), 'B'), S('Two', 'C')]
 const create = (E, id = 't', stages = three(), title = 'Task') => E.call({ id, title, stages })
 const res = r => r.deny ?? r.result
+const glyphs = cells => {
+  const w = new Uint32Array(Uint8Array.from(Buffer.from(cells, 'base64')).buffer)
+  let out = ''
+  for (let i = 0; i < w.length; i += 3) out += String.fromCodePoint(w[i])
+  return out
+}
 const pct = async (E, id) => (await E.view(id)).alt.match(/\d+%/)?.[0]
 // WCAG contrast of two #RRGGBB colours
 const luminance = h => {
@@ -431,6 +437,142 @@ const C = {
     await E.work('Edit')
     const r = await E.stop('All set.')
     return [`${r.block ? 'blocked' : 'passes'}`, !!r.block]
+  },
+  async terminal_bar_is_a_raster_that_fits(E) {
+    await create(E)
+    const out = []
+    for (const cols of [120, 60]) {
+      const nodes = await E.terminal(cols)
+      const r = nodes.find(n => n.type === 'Raster' && n.props.key === 'track-t')
+      const row = glyphs(r.props.cells)
+      out.push({ cols, w: r.props.columns, row })
+    }
+    const fits = out.every(o => o.w + 'Task'.length + 13 <= o.cols)
+    return [out.map(o => `${o.cols}: ${o.row.trim()}`).join(' | '), fits && out.every(o => o.row.includes('One 1/2'))]
+  },
+  async terminal_animates_by_blits(E) {
+    await E.turnStart()
+    await create(E)
+    await E.call({ id: 't', next: true })
+    await E.terminal(120)
+    const frames = []
+    for (let i = 0; i < 10; i++) {
+      E.tick(100)
+      await E.everyTick()
+      frames.push(E.blits.filter(b => b.key === 'track-t').at(-1)?.cells)
+    }
+    const distinct = new Set(frames.filter(Boolean)).size
+    return [`${E.blits.length} blits, ${distinct} distinct frames`, distinct > 1]
+  },
+  async frame_clock_only_with_a_moving_terminal_bar(E) {
+    await E.turnStart()
+    await create(E)
+    await E.svgs()
+    await E.everyTick()
+    const desktop = E.frameTimers()
+    await E.terminal(120)
+    await E.everyTick()
+    const terminal = E.frameTimers()
+    return [`desktop ${desktop}, terminal ${terminal}`, desktop === 0 && terminal === 1]
+  },
+  async terminal_bar_stands_still_after_the_turn(E) {
+    await E.turnStart()
+    await create(E)
+    await E.terminal(120)
+    await E.everyTick()
+    const during = E.frameTimers()
+    await E.turnComplete(undefined)
+    E.tick(1000)
+    await E.everyTick()
+    const before = E.blits.length
+    E.tick(100)
+    await E.everyTick()
+    const after = E.frameTimers()
+    return [`timer during turn ${during}, after ${after}, blits after ${E.blits.length - before}`, during === 1 && after === 0 && E.blits.length === before]
+  },
+  async waiting_bar_stands_still(E) {
+    await E.turnStart()
+    await create(E)
+    await E.call({ id: 't', state: 'needs_input', note: 'Pick one' })
+    await E.terminal(120)
+    E.tick(1000)
+    await E.everyTick()
+    return [`frame timers ${E.frameTimers()}`, E.frameTimers() === 0]
+  },
+  async closed_bar_forgets_its_glide(E) {
+    await E.turnStart()
+    await create(E)
+    await E.terminal(120)
+    await E.call({ id: 't', next: true })
+    await E.terminal(120)
+    E.tick(1000)
+    await E.terminal(120)
+    await E.command('progress-clear')
+    await create(E)
+    const row = (await E.terminal(120)).find(n => n.type === 'Raster' && n.props.key === 'track-t')
+    // a fresh bar at step 1 has no fill, so its pill sits at the left edge instead of sliding back from the old head
+    const first = glyphs(row.props.cells).indexOf('One')
+    return [`pill text at column ${first}`, first >= 0 && first <= 2]
+  },
+  async strip_tool_sits_right_and_name_keeps_its_model(E) {
+    await create(E)
+    await E.spawn('ag1', 'Review Python backend architecture')
+    await E.step('ag1', 'high')
+    await E.agentTool('ag1', 'Read')
+    const desk = (await E.view('t')).strips[0]
+    const full = desk.includes('Review Python backend architecture<tspan class="st"> (haiku 4.5 · high)</tspan>')
+    const anchored = /text-anchor="end"[^>]*>Read</.test(desk)
+    const r = (await E.terminal(110)).find(n => n.type === 'Raster' && n.props.key === 'strips-t')
+    const row = glyphs(r.props.cells).replace(/[⠀-⣿]/g, ' ')
+    const term = /architecture \(haiku 4\.5 · high\) +Read \d+s/.test(row)
+    return [`desktop full name ${full}, tool at right ${anchored}, terminal ${term}`, full && anchored && term]
+  },
+  async agents_make_no_sounds(E) {
+    // agents with no task bar open land on the mod's own Agents bar, whose state follows them
+    await E.spawn('ag1', 'Scan tests')
+    await E.spawn('ag2', 'Read docs')
+    await E.agentTool('ag1', 'Read')
+    // ag2 waits on an approval: its strip and the Agents bar turn amber
+    const held = await E.hold('ag2')
+    E.tick(700)
+    await E.fireTimers()
+    const waited = E.bar('agents:auto')?.state
+    await held.release()
+    await E.turnComplete('ag1', 'error')
+    await E.turnComplete('ag2')
+    E.tick(1000)
+    await E.fireTimers()
+    // and on a task bar: a failed agent
+    await create(E)
+    await E.spawn('ag3', 'Build')
+    await E.turnComplete('ag3', 'error')
+    return [`sounds ${E.sounds.length ? E.sounds.join(', ') : 'none'}; agents bar while waiting ${waited}`, E.sounds.length === 0 && waited === 'needs_input']
+  },
+  async agent_bar_calls_and_questions_are_silent(E) {
+    await create(E)
+    await E.call({ id: 't', state: 'needs_input', note: 'which one?', agentId: 'ag1' })
+    await E.call({ id: 't', state: 'error', note: 'failed', agentId: 'ag1' })
+    await E.call({ id: 't', state: 'running', agentId: 'ag1' })
+    await E.ask('ag1')
+    const agentSounds = E.sounds.length
+    const stateAfterAgentAsk = E.bar('t').state
+    await E.call({ id: 't', state: 'needs_input', note: 'which one?' })
+    await E.call({ id: 't', state: 'running' })
+    await E.ask()
+    return [`agent ${agentSounds} sounds, bar after agent question ${stateAfterAgentAsk}; main ${E.sounds.join(', ')}`, agentSounds === 0 && stateAfterAgentAsk === 'running' && E.sounds.length === 2]
+  },
+  // cc-mods: the footer has no button at all (footer_left_to_the_engine); the band keeps upstream's rule
+  async terminal_buttons_only_where_clicks_land(E) {
+    await create(E)
+    const band = async fs => (await E.terminal(120, fs)).filter(n => n.type === 'Button').length
+    const r = [await band(false), await band(true)]
+    return [`band ${r[0]}/${r[1]}`, r.join() === '0,1']
+  },
+  async desktop_still_draws_svg(E) {
+    await create(E)
+    const svgs = await E.svgs()
+    const term = await E.terminal(120)
+    return [`${svgs.length} svg, ${term.filter(n => n.type === 'Svg').length} svg in terminal`, svgs.length > 0 && !term.some(n => n.type === 'Svg')]
   },
 }
 
