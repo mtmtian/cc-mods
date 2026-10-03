@@ -17,7 +17,6 @@ Live progress bars above the Claude Code prompt. Claude breaks medium and large 
 - The plan can be rewritten mid-run: resent stages keep finished steps by title, and the percent follows
 - Bars survive closing the app: each session's bars are saved and come back when the session is resumed
 - Soft sounds only when you are needed: the main task needs a decision, hits an error or finishes, or a permission dialog put to you has gone unanswered (the engine's own notice, 6 s on the desktop). Subagents finishing or failing stay quiet, and an approval the mode, a hook or the main agent settles never sounds
-- A **Progress** button in the footer, shown only while there is a bar; it hides and shows the bars
 - A small bundled skill documents the tool for Claude, loaded only when needed
 
 ### Install
