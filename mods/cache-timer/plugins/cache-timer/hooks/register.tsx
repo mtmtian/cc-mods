@@ -1,10 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, TurnUsage } from 'claude-code'
 
-import type { Ttl } from '../types'
+import type { LastResponse, Ttl } from '../types'
 
-const lastAt = atom({ plugin: 'cache-timer', key: 'lastAt' } as const, null)
-const lastModel = atom({ plugin: 'cache-timer', key: 'lastModel' } as const, null)
+const lastResponse = atom({ plugin: 'cache-timer', key: 'last' } as const, null)
 const learnedTtl = atom({ plugin: 'cache-timer', key: 'learnedTtl' } as const, '1h')
 
 const MINUTE = 60_000
@@ -12,7 +11,7 @@ const TTL_MS: Record<Ttl, number> = { '5m': 5 * MINUTE, '1h': 60 * MINUTE }
 // A request this close past five minutes may still have caught a 5m entry.
 const SLACK_MS = 15_000
 
-export const label = (remainingMs: number): string => {
+const label = (remainingMs: number): string => {
   if (remainingMs <= 0) {
     return 'Cache cold'
   }
@@ -25,7 +24,7 @@ export const label = (remainingMs: number): string => {
 
 // What one main-thread response says about the lifetime: only a request sent
 // 5 to 60 minutes after the previous one, on the same model, tells 5m from 1h.
-export const infer = (idleMs: number, usage: TurnUsage): Ttl | null => {
+const infer = (idleMs: number, usage: TurnUsage): Ttl | null => {
   const isTelling = idleMs > TTL_MS['5m'] + SLACK_MS && idleMs < TTL_MS['1h']
   if (!isTelling) {
     return null
@@ -38,13 +37,13 @@ export const infer = (idleMs: number, usage: TurnUsage): Ttl | null => {
 }
 
 async function shown($: EngineInterface, fixedTtl: Ttl | null): Promise<string | null> {
-  const at = await read($, lastAt)
-  if (at === null) {
+  const last = await read($, lastResponse)
+  if (last === null) {
     return null
   }
   const ttl = fixedTtl ?? (await read($, learnedTtl))
 
-  return label(at + TTL_MS[ttl] - (await $.clock.now()))
+  return label(last.at + TTL_MS[ttl] - (await $.clock.now()))
 }
 
 export const register: Register = (on, options) => {
@@ -81,8 +80,8 @@ export const register: Register = (on, options) => {
   // A resumed transcript's cache is as old as its last response.
   on('classic.SessionStart', async ($, e, next) => {
     if (e.seconds_since_last_response !== undefined) {
-      const at = (await $.clock.now()) - e.seconds_since_last_response * 1000
-      await update($, lastAt, () => at)
+      const resumed: LastResponse = { at: (await $.clock.now()) - e.seconds_since_last_response * 1000, model: null }
+      await update($, lastResponse, () => resumed)
       $.ui.invalidate('ui.render')
     }
 
@@ -105,16 +104,15 @@ export const register: Register = (on, options) => {
     if (e.agentId !== undefined || result.usage === null) {
       return result
     }
-    const previousAt = await read($, lastAt)
-    const isSameModel = (await read($, lastModel)) === result.usage.model
-    if (previousAt !== null && isSameModel) {
-      const seen = infer(sentAt - previousAt, result.usage)
+    const previous = await read($, lastResponse)
+    if (previous !== null && previous.model === result.usage.model) {
+      const seen = infer(sentAt - previous.at, result.usage)
       if (seen !== null) {
         await update($, learnedTtl, () => seen)
       }
     }
-    await update($, lastAt, () => sentAt)
-    await update($, lastModel, () => result.usage?.model ?? null)
+    const last: LastResponse = { at: sentAt, model: result.usage.model }
+    await update($, lastResponse, () => last)
     $.ui.invalidate('ui.render')
 
     return result

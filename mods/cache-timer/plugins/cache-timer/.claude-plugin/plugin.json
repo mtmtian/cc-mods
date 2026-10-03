@@ -1,6 +1,6 @@
 {
   "name": "cache-timer",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Counts down, in the prompt footer beside the model, the time left before the main thread's prompt cache lapses, so you know when the next message will pay to re-write it",
   "author": { "name": "mtmtian", "url": "https://github.com/mtmtian" },
   "license": "MIT",

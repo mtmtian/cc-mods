@@ -44,7 +44,7 @@ const world = (on: On) => {
     }
     await stream.result
   }
-  const start = ($: EngineInterface) => $.session.start({ cwd: '/w', surface: 'desktop' } as never)
+  const start = ($: EngineInterface) => $.session.start({ cwd: '/w', surface: 'desktop', isInteractive: true })
   // The footer chip as drawn on the desktop, flattened to its texts in order.
   const footer = async ($: EngineInterface) => {
     const tree = await $.ui.render({ component: 'SessionMode', surface: 'desktop', requestId: 'session-mode', props: { modes: [] } })
