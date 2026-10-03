@@ -239,7 +239,7 @@ const SEE_THROUGH = '<style>:root,html,body{background:transparent!important;col
 // a clock that counts in the frame by itself, so the drawing never has to be redrawn each second (a redraw
 // reloads the frame and everything in it blinks): each digit is a reel of its figures behind a one-line window,
 // stepped by a CSS animation whose negative delay is the time already run. Plain SVG, since the host's frame
-// drops foreignObject. {{T:start}} becomes those seconds only when a bar's markup really changes (liveSource)
+// drops foreignObject. {{T:start}} becomes those seconds at every draw (stamp)
 const CLOCK_W = 48 // "59m 59s"
 const LINE = 16
 const CLOCK_CSS = `.ckt{font-variant-numeric:tabular-nums}
@@ -265,29 +265,24 @@ function liveClock(x: number, top: number, start: number, cls: string, textCls: 
   )
 }
 
-// a bar's frame reloads whenever its markup changes; markup that differs only in when it was drawn keeps the
-// source already shown, so its clocks run on instead of the frame blinking
-const lastSource = new Map<string, { template: string; source: string }>()
-function liveSource(id: string, template: string, now: number): string {
-  const last = lastSource.get(id)
-  if (last?.template === template) return last.source
-  const source = template.replace(/\{\{T:(\d+)\}\}/g, (_, t: string) => Math.max(0, (now - Number(t)) / 1000).toFixed(1))
-  lastSource.set(id, { template, source })
-  return source
-}
+// the desktop shows a drawing afresh on later redraws even when its markup is unchanged, and that restarts its
+// clocks: each draw starts them at the time already run, never at a time kept from an earlier draw
+const stamp = (template: string, now: number) =>
+  template.replace(/\{\{T:(\d+)\}\}/g, (_, t: string) => Math.max(0, (now - Number(t)) / 1000).toFixed(1))
 
-// a bar is drawn twice: the track itself as a plain picture, which the desktop keeps steady whatever else redraws,
-// and a see-through layer on top for the hover parts (checkpoint times, the pill's clock). That layer needs an
-// interactive frame, and the desktop rebuilds such frames on every redraw of the band; empty until hovered, the
-// rebuild is invisible. A plan is immutable, so both drawings at one width are reused until the plan changes
-type Track = { base: string; overlay: string }
-const drawn = new WeakMap<Plan, { W: number; track: Track }>()
+// a bar is drawn twice: the track itself as a plain picture, and a see-through layer on top for the hover parts
+// (checkpoint times, the pill's clock). That layer needs an interactive frame, and the desktop rebuilds such frames
+// on every redraw of the band; empty until hovered, the rebuild is invisible. A plan is immutable, so both drawings
+// at one width are reused until the plan changes, or until the head's slide to a new step has played: a picture the
+// desktop shows again would slide it again
+type Track = { base: string; overlay: string; isGliding: boolean }
+const drawn = new WeakMap<Plan, { W: number; track: Track; until: number }>()
 
-function trackSvg(p: Plan, W: number): Track {
+function trackSvg(p: Plan, W: number, now: number): Track {
   const cached = drawn.get(p)
-  if (cached?.W === W) return cached.track
+  if (cached?.W === W && now < cached.until) return cached.track
   const track = drawTrack(p, W)
-  drawn.set(p, { W, track })
+  drawn.set(p, { W, track, until: track.isGliding ? now + GLIDE_MS : Infinity })
   return track
 }
 
@@ -446,7 +441,7 @@ ${CLOCK_CSS}
   // the hover layer: checkpoint areas under the pill's copy, so the pill wins where they meet; tips on top
   const overlay = `${open}${SEE_THROUGH}${hoverStyle}${hits}<g transform="translate(${kx.toFixed(1)} 0)">${timePill}</g>${tips}</svg>`
 
-  return { base, overlay }
+  return { base, overlay, isGliding: glide }
 }
 
 const AGENT_COLOR: Record<AgentRun['state'], string> = {
@@ -506,11 +501,14 @@ function visibleAgents(p: Plan, now: number, max: number, isExpanded: boolean): 
   return { shown: list.filter(a => keep.has(a.id)), hidden: list.filter(a => !keep.has(a.id)) }
 }
 
-// what each strip showed last time it was drawn, so a change morphs from the old status instead of jumping
-const lastStrip = new Map<string, { tool: string; color: string }>()
+// what each strip shows, and what it showed before its last change and when, so a change morphs from the old status
+// instead of jumping; only draws within the morph carry it, since the desktop shows a drawing again on later redraws
+type StripLook = { tool: string; color: string }
+const lastStrip = new Map<string, StripLook & { was?: StripLook; at: number }>()
 const MORPH = '.2s'
+const MORPH_MS = 200
 
-// a strip's markup per agent object: drawn once per change, so its morph plays once and later redraws match
+// a strip's markup per agent object: redrawn when the agent changes or its morph is over, so later redraws match
 const drawnRows = new WeakMap<AgentRun, { key: string; html: string }>()
 
 
@@ -536,7 +534,7 @@ const nameMarkup = (name: string) => {
 type StripRow = { key: string; html: string; height: number }
 
 // each strip is its own drawing, so a change to one agent redraws that strip alone, never the bar or the others
-function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[], W: number): StripRow[] {
+function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[], W: number, now: number): StripRow[] {
   const isNarrow = W < NARROW
   const SW = W - GUTTER
   const rows: StripRow[] = []
@@ -546,15 +544,20 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
   v.shown.forEach((a, i) => {
     // the first strip keeps a little room from the track above it
     const y = i === 0 ? 5 : STRIP_GAP
-    const rowKey = `${W}|${y}|${all.indexOf(a)}`
+    const c = AGENT_COLOR[a.state]
+    const word = a.state === 'running' || a.state === 'waiting' ? a.tool : ''
+    const last = lastStrip.get(a.id)
+    const look = last && last.tool === word && last.color === c ? last : { tool: word, color: c, was: last && { tool: last.tool, color: last.color }, at: now }
+    lastStrip.set(a.id, look)
+    // a status change: the old word blurs out while the new one blurs in, and the tint flows to the new colour
+    const was = now - look.at < MORPH_MS ? look.was : undefined
+    const rowKey = `${W}|${y}|${all.indexOf(a)}|${was ? 'morph' : ''}`
     const cachedRow = drawnRows.get(a)
     if (cachedRow?.key === rowKey) {
       rows.push({ key: a.id, html: cachedRow.html, height: y + STRIP_H })
       return
     }
-    const c = AGENT_COLOR[a.state]
     const indent = a.depth > 0 ? 10 : 0
-    const word = a.state === 'running' || a.state === 'waiting' ? a.tool : ''
     const dots = new Map<string, string>()
     if (a.state === 'running') {
       for (let col = 0; col * 3 < SW; col++) {
@@ -566,9 +569,6 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
     }
     // a still texture: the pulsing state dot already says the agent is live
     const px = [...dots].map(([, d]) => `<path fill="${c}" fill-opacity=".32" d="${d}"/>`).join('')
-    // a status change: the old word blurs out while the new one blurs in, and the tint flows to the new colour
-    const was = lastStrip.get(a.id)
-    lastStrip.set(a.id, { tool: word, color: c })
     const isWordChanged = was !== undefined && was.tool !== word
     const flow = (attr: string) => (was && was.color !== c ? `<animate attributeName="${attr}" from="${was.color}" to="${c}" dur="${MORPH}" fill="freeze"/>` : '')
     // the tool word sits at the right, just before the clock, so the name and its model get the rest of the row
@@ -1034,10 +1034,6 @@ function forgetGone(list: readonly Plan[]) {
   const shown = new Set(list.flatMap(p => (p.agents ?? []).map(a => a.id)))
   for (const id of lastHead.keys()) if (!bars.has(id)) lastHead.delete(id)
   for (const id of glide.keys()) if (!bars.has(id)) glide.delete(id)
-  for (const id of lastSource.keys()) {
-    const [bar, strip] = id.split('/')
-    if (!bars.has(bar ?? '') || (strip !== undefined && strip !== '+' && !shown.has(strip))) lastSource.delete(id)
-  }
   for (const id of lastStrip.keys()) if (!shown.has(id)) lastStrip.delete(id)
   for (const [id, home] of agentHome) {
     if (bars.has(home) && live.has(id)) continue
@@ -1382,14 +1378,13 @@ export const register: Register = on => {
         {list.flatMap((p, i) => {
           const isExpanded = opened.includes(p.id)
           const v = visibleAgents(p, now, budget, isExpanded)
-          const track = trackSvg(p, trackW)
-          // the layer is rebuilt on every redraw anyway, so its clock is set from now each time
-          const hover = track.overlay.replace(/\{\{T:(\d+)\}\}/g, (_, t: string) => Math.max(0, (now - Number(t)) / 1000).toFixed(1))
+          const track = trackSvg(p, trackW, now)
+          const hover = stamp(track.overlay, now)
           const strips = v && Svg
-            ? stripsSvg(v, p.agents ?? [], trackW).map(r => (
+            ? stripsSvg(v, p.agents ?? [], trackW, now).map(r => (
                 <Svg
                   key={`strip-${p.id}-${r.key}`}
-                  source={liveSource(`${p.id}/${r.key}`, `<svg xmlns="http://www.w3.org/2000/svg" width="${trackW}" height="${r.height}">${STRIP_STYLE}${r.html}</svg>`, now)}
+                  source={stamp(`<svg xmlns="http://www.w3.org/2000/svg" width="${trackW}" height="${r.height}">${STRIP_STYLE}${r.html}</svg>`, now)}
                   alt={stripAlt(p, r.key, v.hidden)}
                   width={trackW}
                   height={r.height}
