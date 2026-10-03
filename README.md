@@ -1,6 +1,6 @@
 # cc-mods
 
-Claude Code mods (function-hook plugins) forked from other authors, kept in one repo. Each mod lives under `mods/<name>/` as a squashed `git subtree` of its upstream: the upstream's license stays with it, and each squash commit names the upstream commit it came from.
+Claude Code mods (function-hook plugins), forked from other authors or written here, kept in one repo. Each mod lives under `mods/<name>/`. A forked one is a squashed `git subtree` of its upstream: the upstream's license stays with it, and each squash commit names the upstream commit it came from. One written here has no upstream and carries its own license.
 
 The repo is also a plugin marketplace, so a forked mod can be installed from here once it carries local changes.
 
@@ -10,6 +10,7 @@ The repo is also a plugin marketplace, so a forked mod can be installed from her
 | --- | --- | --- | --- |
 | [md-prompt](mods/md-prompt) | [nogu66/md-prompt](https://github.com/nogu66/md-prompt) | `0.1.1-cc.1`: `__tests__/`, `__pycache__` and other dunder paths are not painted bold ([nogu66/md-prompt#4](https://github.com/nogu66/md-prompt/issues/4)) | MIT |
 | [plan-progress](mods/plan-progress) | [zycck/claude-mods](https://github.com/zycck/claude-mods) | `0.5.0-cc.4`: the usage rules ride in the tool description instead of `prompt.compose`, which the desktop app's engine (2.1.284) does not have; plan-mode import removed; the hidden demo-reel entry that wrote a file to a model-given path removed; agent strip text follows the light/dark theme (it was near-white on the light theme, 1.1:1) and the tool word reads at 4.5:1 or better on both; only a running bar twinkles, and only near its head; agent strips fold into one summary row by default (waiting and failed agents keep theirs, ▾ opens the rest); finished bars leave after a minute; colours come from the desktop app's own tokens (brand clay for running, accent blue for waiting, its danger and success, warm greys) instead of the Pro violet and cool grey; the state glyph before each title follows the light/dark theme too | MIT |
+| [cache-timer](mods/cache-timer) | none, written here (idea from [@savvyntsev](https://x.com/savvyntsev/status/2105982856455458905)) | `0.3.0`: counts down, as a dim label in the footer left of the model, how long the main thread's prompt cache stays warm; the lifetime starts at 1h and follows the API (a model switch names it, a hit or miss after 5 to 60 idle minutes tells 1h from 5m) | MIT |
 
 ## Install a mod from this repo
 
@@ -60,6 +61,8 @@ git subtree add --prefix=mods/<name> https://github.com/<owner>/<repo>.git <bran
 ```
 
 Then add the mod to `upstreams.tsv`, a row to the table above, and an entry to `.claude-plugin/marketplace.json` whose `source` points at the directory holding that mod's `.claude-plugin/plugin.json`.
+
+A mod written here goes in `mods/<name>/plugins/<name>/` with its own `LICENSE` beside it; it gets a row in the table and a marketplace entry, but no `upstreams.tsv` line.
 
 ## Notes
 

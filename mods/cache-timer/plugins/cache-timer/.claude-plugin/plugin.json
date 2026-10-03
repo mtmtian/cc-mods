@@ -1,0 +1,17 @@
+{
+  "name": "cache-timer",
+  "version": "0.3.0",
+  "description": "Counts down, in the prompt footer beside the model, the time left before the main thread's prompt cache lapses, so you know when the next message will pay to re-write it",
+  "author": { "name": "mtmtian", "url": "https://github.com/mtmtian" },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "ttl": {
+      "type": "string",
+      "title": "Cache lifetime",
+      "description": "auto: start at 1h and follow what the API reports (a model switch names it; a cache miss after 5 to 60 idle minutes means 5m, a hit means 1h). 1h or 5m: always count down from that.",
+      "default": "auto",
+      "options": ["auto", "1h", "5m"]
+    }
+  }
+}
