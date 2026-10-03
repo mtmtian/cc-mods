@@ -757,26 +757,21 @@ function addRun(p: Plan, run: AgentRun, parentId: string | undefined, now: numbe
   return syncAuto({ ...p, agents: list, agentsDoneAt: null }, now)
 }
 
-// changes one agent's strip inside the latest list; sounds follow the bar's state
+// changes one agent's strip inside the latest list; silent: an agent sounds only when it waits on the person
 async function editAgent($: EngineInterface, agentId: string, change: (a: AgentRun) => AgentRun) {
   const home = agentHome.get(agentId)
   if (!home) return
   const now = await $.clock.now()
-  let before: PlanState | undefined
-  let after: PlanState | undefined
   let isFolding = false
   await update($, plans, list =>
     list.map(p => {
       if (p.id !== home || !p.agents?.some(a => a.id === agentId)) return p
-      before = p.state
       const next = syncAuto({ ...p, agents: p.agents.map(a => (a.id === agentId ? change(a) : a)) }, now)
-      after = next.state
       isFolding = !p.agentsDoneAt && next.agentsDoneAt !== null
       return next
     }),
   )
   if (isFolding) foldUntil = now + FOLD_MS + 200
-  if (before !== undefined && after !== undefined) chime($, before, after)
 }
 
 // module maps outlive the bars they describe: a bar pushed out past MAX_BARS, a cleared list, an agent
@@ -1215,6 +1210,8 @@ export const register: Register = on => {
     if (agentId && useId && verdict.decision === 'ask') {
       $.clock.after(600, async () => {
         if (toolUses.get(useId) !== agentId) return
+        // the one moment an agent needs the person, on whatever bar it sits
+        if (!waiting.has(agentId)) play($, 'decision')
         waiting.add(agentId)
         await editAgent($, agentId, a => ({ ...a, state: 'waiting', tool: 'Needs approval' }))
       })
@@ -1242,8 +1239,6 @@ export const register: Register = on => {
       const isFailed = e.reason !== 'answer'
       const tool = e.reason === 'aborted' ? 'Stopped' : isFailed ? 'Failed' : 'Done'
       await editAgent($, agentId, a => ({ ...a, state: isFailed ? 'error' : 'done', tool, endedAt: now }))
-      // the mod's own bar sounds through its state; a strip on a task bar sounds here
-      if (isFailed && agentHome.get(agentId) !== AGENTS) play($, 'error')
       agentHome.delete(agentId)
       waiting.delete(agentId)
     }

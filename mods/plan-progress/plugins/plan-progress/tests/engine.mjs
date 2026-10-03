@@ -74,6 +74,15 @@ export async function boot(file, kept = new Map()) {
     spawn: (agentId, description, parentAgentId) => dispatch('agent.spawn', { description, subagentType: 'general-purpose', parentAgentId }, () => ({ agentId, model: 'claude-haiku-4-5-20251001' })),
     step: (agentId, effort) => (async () => { const g = hooks.find(h => h.event === 'turn.step').fn($, { agentId, model: 'claude-haiku-4-5-20251001', effort, turnId: 't', index: 0, messageCount: 1 }, async function* () {}); for await (const _ of g); })(),
     agentTool: (agentId, tool) => dispatch('tool.call', { tool, agentId, tool_use_id: uid() }, () => ({ result: {} })),
+    // an agent's call held on a permission prompt: the check says ask and the call stays open past the mod's 600 ms wait
+    approval: agentId => {
+      const id = uid()
+      return dispatch('tool.call', { tool: 'Bash', agentId, tool_use_id: id }, async () => {
+        await dispatch('tool.check', { tool: 'Bash', tool_use_id: id }, () => ({ decision: 'ask' }))
+        await api.fireTimers()
+        return { result: {} }
+      })
+    },
     turnComplete: (agentId, reason = 'answer') => dispatch('turn.complete', { agentId, reason }, () => ({})),
     turnStart: () => dispatch('turn.start', {}, () => ({})),
     sessionStart: () => dispatch('session.start', {}, () => ({})),

@@ -391,6 +391,33 @@ const C = {
     const hit = src.indexOf('class="h'), pill = src.indexOf('<g transform="translate('), tip = src.indexOf('class="tp')
     return [`hit ${hit} < pill ${pill} < tip ${tip}`, hit > 0 && hit < pill && pill < tip]
   },
+  // cc-mods: a sound only when the person is needed; agents finishing or failing stay quiet
+  async cc_agents_finish_and_fail_quietly(E) {
+    await E.spawn('ag1', 'Scan') // no task bar yet: the mod's own Agents bar
+    await E.spawn('ag2', 'Read')
+    await E.turnComplete('ag1')
+    await E.turnComplete('ag2', 'error')
+    await create(E)
+    await E.spawn('ag3', 'Check') // on the task bar
+    await E.turnComplete('ag3', 'aborted')
+    return [`sounds ${JSON.stringify(E.sounds)}`, E.sounds.length === 0]
+  },
+  async cc_agent_held_on_approval_sounds_once(E) {
+    await create(E)
+    await E.spawn('ag1', 'Scan')
+    await E.approval('ag1')
+    await E.agentTool('ag1', 'Read')
+    return [`sounds ${JSON.stringify(E.sounds)}`, JSON.stringify(E.sounds) === '["sounds/decision.wav"]']
+  },
+  async cc_main_plan_still_sounds(E) {
+    await create(E)
+    await E.call({ id: 't', state: 'needs_input', note: 'Pick one' })
+    await E.call({ id: 't', state: 'running' })
+    await E.call({ id: 't', failed: 'A', note: 'Broke' })
+    await E.call({ id: 't', state: 'done' })
+    const want = '["sounds/decision.wav","sounds/error.wav","sounds/done.wav"]'
+    return [`sounds ${JSON.stringify(E.sounds)}`, JSON.stringify(E.sounds) === want]
+  },
   async stop_still_blocks_open_bar(E) {
     await E.turnStart()
     await create(E)
