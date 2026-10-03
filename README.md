@@ -48,11 +48,13 @@ While working on a mod, `--plugin-dir` loads the checkout directly and reloads o
 bash scripts/upstream-status.sh
 ```
 
-To take the upstream changes, with the URL and branch from `upstreams.tsv`:
+To take the upstream changes, with the URL and branch from `upstreams.tsv` (on a branch, merged with a merge commit so the squash commit's `git-subtree-split` trailer stays on `main`):
 
 ```bash
 git subtree pull --prefix=mods/<name> <url> <branch> --squash
 ```
+
+Resolve conflicts by keeping each local change on top of upstream's version, never by taking one side whole. Then check that every local change still holds: the mod's tests (each local change has a regress case where it can), and a strict type check against the engine's types, which catches call sites the two sides changed differently.
 
 ## Add another mod
 
@@ -67,4 +69,4 @@ A mod written here goes in `mods/<name>/plugins/<name>/` with its own `LICENSE` 
 ## Notes
 
 - GitHub only runs workflows from the repo root's `.github/workflows`, so the CI files inside `mods/*/.github/` never run here.
-- Fixes meant for an upstream go there as an issue or a pull request first; a local change stays here only until the upstream takes it or declines it, and is listed in the table.
+- Each forked mod here is a personal build on upstream: upstream is the base and the local changes are kept on top of it, listed in the table. A local change leaves only when upstream ships the same behaviour (upstream's code then replaces ours, as md-prompt's dunder fix did in 0.1.2) or when we drop it ourselves; an upstream declining it is no reason to drop it. A fix useful to everyone may also be offered upstream as an issue or a pull request.
