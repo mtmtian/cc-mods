@@ -81,6 +81,8 @@ export async function boot(file, kept = new Map()) {
     plans: () => $.__get({ ref: { key: 'plans' }, initial: [] }),
     bar: id => api.plans().find(p => p.id === id),
     steps: id => (api.bar(id)?.stages ?? []).flatMap(s => s.steps.map(st => `${st.title}:${st.status}`)).join(' '),
+    // the footer's mode labels as the real SessionMode render leaves them; 'native' when the engine draws them alone
+    modes: () => dispatch('ui.render', { component: 'SessionMode', surface: 'desktop', props: { modes: [] } }, () => 'native'),
     // what the person sees, read from the real AbovePrompt render: the Svg alt text and source of one bar
     svgs: async () => {
       const tree = await dispatch('ui.render', { component: 'AbovePrompt', surface: 'desktop', props: { bodyColumns: globalThis.COLS ?? 120, hasSurvey: false } }, () => null)

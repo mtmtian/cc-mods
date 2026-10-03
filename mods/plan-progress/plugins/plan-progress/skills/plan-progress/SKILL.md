@@ -22,4 +22,4 @@ A title the bar does not have is refused with the bar's step list. A title used 
 
 The result says `done/total, state, active step`; no need to check the bar.
 
-User commands: `/progress` toggle, `/progress-demo`, `/progress-sounds`, `/progress-clear`. The **Progress** button in the footer is always shown while the mod is loaded.
+User commands: `/progress` toggle, `/progress-demo`, `/progress-sounds`, `/progress-clear`. The **Progress** button in the footer appears only while there is a bar to show or hide.

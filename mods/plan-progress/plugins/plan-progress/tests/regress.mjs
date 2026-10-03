@@ -52,6 +52,14 @@ const C = {
     const req = E.toolSpec.inputSchema.properties.stages.items.properties.steps.items.required
     return [`${E.steps('t')}; ${res(r)}; required ${req}`, E.steps('t') === 'A:active B:pending' && req.join() === 'title']
   },
+  async mode_button_only_while_a_plan_exists(E) {
+    const before = await E.modes()
+    await create(E)
+    const during = JSON.stringify(await E.modes()).includes('progress-toggle')
+    await E.press('close-t')
+    const after = await E.modes()
+    return [`no plan: ${JSON.stringify(before)}; plan: button ${during}; closed: ${JSON.stringify(after)}`, before === 'native' && during && after === 'native']
+  },
   async T11_active_forward_unchanged(E) {
     await create(E)
     await E.call({ id: 't', active: 'C' })

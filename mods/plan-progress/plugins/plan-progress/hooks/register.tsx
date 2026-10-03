@@ -1064,21 +1064,19 @@ export const register: Register = on => {
     return { text: 'Sounds: decision, error, done.' }
   })
 
-  // always drawn, so the person sees the mod is loaded; dim while there is nothing to show
+  // drawn only while there is a plan to show or hide; with none the footer is the engine's alone
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     const count = (await read($, plans)).length
+    if (count === 0) return next(e)
     const open = await read($, isOpen)
     const { Box, Button } = $.ui.resolve(e)
     // other mods add their labels to modes beneath us; keep them
     const below = await next(e)
-    const press = () =>
-      count === 0
-        ? $.ui.toast('plan-progress is on. A bar appears when Claude starts a task with several steps.')
-        : update($, isOpen, () => !open)
+    const press = () => update($, isOpen, () => !open)
 
     return (
       <Box flexDirection="row" alignItems="center" gap={1}>
-        <Button key="progress-toggle" dimColor={count === 0 || !open} label={count > 1 ? `Progress ${count}` : 'Progress'} onPress={press} />
+        <Button key="progress-toggle" dimColor={!open} label={count > 1 ? `Progress ${count}` : 'Progress'} onPress={press} />
         {below}
       </Box>
     )
