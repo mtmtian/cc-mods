@@ -206,6 +206,30 @@ const ICON_PATH: Partial<Record<PlanState, string>> = {
   done: 'M20 6 9 17l-5-5',
 }
 
+// the state glyph before a title follows the theme as the strips do: the desktop draws it as a small image with its own
+// light rule, in the desktop's -100 tokens ([dark, light]), each 3.7:1 or more on its background; the terminal, which
+// has no images, keeps the coloured character
+const GLYPH_HUE: Record<PlanState, [string, string]> = {
+  running: ['#D97757', '#C6613F'],
+  needs_input: ['#2C84DB', '#2C84DB'],
+  error: ['#DD5353', '#B53333'],
+  done: ['#459315', '#2F7613'],
+}
+// the question mark fills little of its 24 px box, so it is drawn larger to weigh as much as the cross and the check;
+// every icon is centred in the 12 x 20 glyph and keeps a 1.8 px line whatever its scale
+const GLYPH_FIT: Partial<Record<PlanState, { scale: number; cy: number }>> = { needs_input: { scale: 0.8, cy: 12.25 } }
+const glyphSvg = (state: PlanState) => {
+  const [dark, light] = GLYPH_HUE[state]
+  const icon = ICON_PATH[state]
+  const { scale, cy } = GLYPH_FIT[state] ?? { scale: 0.5, cy: 12 }
+  const at = `translate(${(6 - 12 * scale).toFixed(2)} ${(10 - cy * scale).toFixed(2)}) scale(${scale})`
+  const mark = icon
+    ? `<path d="${icon}" transform="${at}" fill="none" class="gs" stroke-width="${(1.8 / scale).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"/>`
+    : '<circle cx="6" cy="10" r="4" class="gf"/>'
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="20" viewBox="0 0 12 20"><style>.gs{stroke:${dark}}.gf{fill:${dark}}@media (prefers-color-scheme:light){.gs{stroke:${light}}.gf{fill:${light}}}</style>${mark}</svg>`
+}
+const GLYPH_SVG = Object.fromEntries((Object.keys(GLYPH_HUE) as PlanState[]).map(state => [state, glyphSvg(state)])) as Record<PlanState, string>
+
 // how long each finished step took (from the previous finish, or the plan's start) and each finished stage
 function stepTimes(p: Plan): { steps: Map<PlanStep, number>; stages: (number | undefined)[] } {
   const ends = p.stages.flatMap(s => s.steps).flatMap(st => (st.doneAt === undefined ? [] : [st.doneAt])).sort((a, b) => a - b)
@@ -1117,7 +1141,11 @@ export const register: Register = on => {
           return [
             ...line,
             <Box key={`bar-${p.id}`} flexDirection="row" alignItems={v ? 'flex-start' : 'center'} gap={1}>
-              <Text color={color}>{STATE_GLYPH[p.state]}</Text>
+              {Svg ? (
+                <Svg key={`glyph-${p.id}`} source={GLYPH_SVG[p.state]} alt={p.state.replace('_', ' ')} width={12} height={20} />
+              ) : (
+                <Text color={color}>{STATE_GLYPH[p.state]}</Text>
+              )}
               <Text wrap="truncate">{p.title}</Text>
               {isFoldable(p) ? (
                 <Button key={`agents-${p.id}`} plain dimColor label={isExpanded ? '▴' : `▾ ${p.agents?.length ?? 0}`} onPress={() => toggle(p.id)} />

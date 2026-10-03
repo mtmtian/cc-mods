@@ -197,6 +197,26 @@ const C = {
     const ok = pills.running === '#B55C3E' && worst >= 4.5 && !all.includes('#808080')
     return [`pills ${JSON.stringify(pills)}, worst white ${worst.toFixed(2)}:1, cool grey ${all.includes('#808080')}`, ok]
   },
+  // cc-mods: the state glyph before each title follows the theme too, and stands out from either background (3:1)
+  async cc_glyph_follows_theme(E) {
+    const lum = h => {
+      const [r, g, b] = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+    const ratio = (a, b) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05)
+    const seen = {}
+    for (const [id, state] of [['r', 'running'], ['n', 'needs_input'], ['e', 'error'], ['d', 'done']]) {
+      await create(E, id, three(), `Bar ${id}`)
+      if (state !== 'running') await E.call({ id, state })
+      const glyph = (await E.svgs()).find(v => v.key === `glyph-${id}`)
+      const dark = glyph?.source.match(/<style>\.gs\{stroke:(#[0-9A-F]{6})\}/)?.[1]
+      const light = glyph?.source.match(/prefers-color-scheme:light\)\{\.gs\{stroke:(#[0-9A-F]{6})\}/)?.[1]
+      seen[state] = { dark, light, onDark: dark && ratio(dark, '#262624'), onLight: light && ratio(light, '#FAF9F5'), alt: glyph?.alt }
+    }
+    const ok = Object.values(seen).every(g => g.dark && g.light && g.onDark >= 3 && g.onLight >= 3 && g.alt)
+    const worst = Math.min(...Object.values(seen).flatMap(g => [g.onDark ?? 0, g.onLight ?? 0]))
+    return [`${Object.entries(seen).map(([k, g]) => `${k} ${g.dark}/${g.light}`).join(', ')}; worst ${worst.toFixed(1)}:1`, ok]
+  },
   // cc-mods: the demo-reel entry is gone; "reel" with a note is an ordinary id, refused until it has stages
   async cc_reel_entry_gone(E) {
     const r = await E.call({ id: 'reel', note: '/tmp/plan-progress-reel.json' })
