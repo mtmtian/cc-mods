@@ -12,7 +12,7 @@ node scenarios.mjs        # the audit cases, prints what each one does now
 node look.mjs             # writes look.html: the bars as the desktop draws them, for a browser
 ```
 
-`compile.cjs` needs TypeScript: a global or local `typescript` package, or its path in the `TYPESCRIPT` environment variable.
+Run `npm ci` at the repository root first. `compile.cjs` uses that locked TypeScript CLI to transpile the fixture without type checking, then redirects the `claude-code` import to the stub engine. Type checking against the real engine SDK runs separately in `npm run check:plugins`. Compiler errors fail the command and temporary compiler output is removed on both success and failure.
 
 ## Live demo (in a Claude Code session, after the mod has reloaded)
 

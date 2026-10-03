@@ -15,7 +15,7 @@
   "devDependencies": {
     "@anthropic-ai/claude-code": "2.1.288",
     "bun": "1.4.2",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   },
   "allowScripts": {
     "@anthropic-ai/claude-code@2.1.288": true,
