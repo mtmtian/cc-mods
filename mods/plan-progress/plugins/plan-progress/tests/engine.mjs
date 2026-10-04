@@ -96,8 +96,16 @@ export async function boot(file, kept = new Map()) {
         return isReadOnly ? { result: {}, text: '', isReadOnly: true } : { result: {}, text: '' }
       }),
     exitPlan: result => dispatch('tool.call', { tool: 'ExitPlanMode', tool_use_id: uid() }, () => result),
-    spawn: (agentId, description, parentAgentId) => dispatch('agent.spawn', { description, subagentType: 'general-purpose', parentAgentId }, () => ({ agentId, model: 'claude-haiku-4-5-20251001' })),
-    step: (agentId, effort) => (async () => { const g = hooks.find(h => h.event === 'turn.step').fn($, { agentId, model: 'claude-haiku-4-5-20251001', effort, turnId: 't', index: 0, messageCount: 1 }, async function* () {}); for await (const _ of g); })(),
+    spawn: (agentId, description, parentAgentId, subagentType = 'general-purpose', model = 'claude-haiku-4-5-20251001') =>
+      dispatch('agent.spawn', { description, subagentType, parentAgentId }, () => ({ agentId, model })),
+    // one request of an agent's loop; `usage` is what its response reports (the four counts), absent for none
+    step: (agentId, effort, usage, model = 'claude-haiku-4-5-20251001') => (async () => {
+      const reply = { turnId: 't', index: 0, answer: '', toolUses: [], stopReason: usage ? 'tool_use' : null, usage: usage ? { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, ...usage, model } : null }
+      const g = hooks.find(h => h.event === 'turn.step').fn($, { agentId, model, effort, turnId: 't', index: 0, messageCount: 1 }, async function* () { return reply })
+      let r = await g.next()
+      while (!r.done) r = await g.next()
+      return r.value
+    })(),
     agentTool: (agentId, tool) => dispatch('tool.call', { tool, agentId, tool_use_id: uid() }, () => ({ result: {} })),
     // the engine's notice that a permission dialog has waited on the person (6 s on the desktop) or another kind of notice
     notify: (notification_type, agentId) =>

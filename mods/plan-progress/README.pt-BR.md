@@ -1,4 +1,4 @@
-> cc-mods fork: this copy differs from upstream (no plan-mode import, no footer button, sounds only when you are needed). See the [cc-mods README](../../README.md#mods).
+> cc-mods fork: this copy differs from upstream (no plan-mode import, no footer button, sounds only when you are needed, agent strips that name their role and context). See the [cc-mods README](../../README.md#mods).
 
 # Mods para Claude Code
 

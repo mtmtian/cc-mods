@@ -11,11 +11,10 @@ const TTL_MS: Record<Ttl, number> = { '5m': 5 * MINUTE, '1h': 60 * MINUTE }
 // A request this close past five minutes may still have caught a 5m entry.
 const SLACK_MS = 15_000
 
-const label = (remainingMs: number): string => {
-  if (remainingMs <= 0) {
+const label = (seconds: number): string => {
+  if (seconds <= 0) {
     return 'Cache cold'
   }
-  const seconds = Math.ceil(remainingMs / 1000)
   const mm = String(Math.floor(seconds / 60)).padStart(2, '0')
   const ss = String(seconds % 60).padStart(2, '0')
 
@@ -42,8 +41,24 @@ async function shown($: EngineInterface, fixedTtl: Ttl | null): Promise<string |
     return null
   }
   const ttl = fixedTtl ?? (await read($, learnedTtl))
+  // whole wall-clock seconds, so the label steps once at each redraw (beat) however late its timer fires
+  const seconds = Math.floor((last.at + TTL_MS[ttl]) / 1000) - Math.floor((await $.clock.now()) / 1000)
 
-  return label(last.at + TTL_MS[ttl] - (await $.clock.now()))
+  return label(seconds)
+}
+
+// Redraws just after each wall-clock second. Every redraw makes the desktop
+// show the other plugins' pictures afresh, restarting their animations;
+// plan-progress redraws its band on the same second, so the two land
+// together and its once-a-second loops go on unbroken. One chain per module,
+// however often the session starts.
+let isBeating = false
+function beat($: EngineInterface, now: number): void {
+  isBeating = true
+  $.clock.after(1000 - (now % 1000) + 25, async () => {
+    $.ui.invalidate('ui.render')
+    beat($, await $.clock.now())
+  })
 }
 
 export const register: Register = (on, options) => {
@@ -51,7 +66,9 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    $.clock.every(1000, () => $.ui.invalidate('ui.render'))
+    if (!isBeating) {
+      beat($, await $.clock.now())
+    }
 
     return started
   })

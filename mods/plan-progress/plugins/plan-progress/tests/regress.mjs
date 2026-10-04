@@ -447,6 +447,65 @@ const C = {
     const after = (await E.view('t')).strips[0]
     return [`model ${before.includes('(haiku 4.5)')}, effort ${after.includes('(haiku 4.5 · low)')}`, before.includes('(haiku 4.5)') && after.includes('(haiku 4.5 · low)')]
   },
+  // cc-mods: a strip names the agent definition before the model, and the context its last request carried
+  async cc_strip_shows_role_and_context(E) {
+    await create(E)
+    await E.spawn('ag1', 'Scan tests', undefined, 'worker', 'claude-sonnet-5-5')
+    const before = (await E.view('t')).strips[0]
+    await E.step('ag1', 'high', { input_tokens: 8, cache_read_input_tokens: 40_000, cache_creation_input_tokens: 2_000, output_tokens: 300 }, 'claude-sonnet-5-5')
+    const running = (await E.view('t')).strips[0]
+    const alt = (await E.svgs()).some(p => p.alt === 'agent Scan tests: running, Starting, ctx 42k')
+    await E.turnComplete('ag1')
+    const done = (await E.view('t')).strips[0]
+    const role = running.includes('(worker · sonnet 5.5 · high)')
+    const ctx = !before.includes('ctx ') && running.includes('>ctx 42k<') && done.includes('>ctx 42k<')
+    // a window the model id does not name is no share of anything
+    const noShare = !/ctx [^<]*%/.test(running)
+    return [`role ${role}, ctx none→42k, kept when done ${ctx}, no share ${noShare}, alt ${alt}`, role && ctx && noShare && alt]
+  },
+  // cc-mods: the share shows where the id names the window ([1m]); a plugin's agent drops its plugin's prefix
+  async cc_context_share_for_a_named_window(E) {
+    await create(E)
+    await E.spawn('ag1', 'Review', undefined, 'pstack:poteto-agent', 'claude-opus-5-5[1m]')
+    await E.step('ag1', 'xhigh', { cache_read_input_tokens: 250_000 }, 'claude-opus-5-5[1m]')
+    const s = (await E.view('t')).strips[0]
+    const ok = s.includes('>ctx 250k · 25%<') && s.includes('(poteto-agent · opus 5.5 · xhigh)')
+    return [`share ${s.includes('>ctx 250k · 25%<')}, role ${s.includes('(poteto-agent · opus 5.5 · xhigh)')}`, ok]
+  },
+  // cc-mods: the main thread's requests and a response without usage leave the strips alone
+  async cc_context_only_from_agent_responses(E) {
+    await create(E)
+    await E.spawn('ag1', 'Scan tests')
+    await E.step(undefined, 'high', { cache_read_input_tokens: 90_000 })
+    await E.step('ag1', 'low')
+    const s = (await E.view('t')).strips[0]
+    return [`ctx drawn ${s.includes('ctx ')}`, !s.includes('ctx ')]
+  },
+  // cc-mods: the terminal strip carries the same context count before the time
+  async cc_terminal_strip_shows_context(E) {
+    await create(E)
+    await E.spawn('ag1', 'Scan tests', undefined, 'Explore')
+    await E.step('ag1', 'low', { input_tokens: 1_200 })
+    const raster = (await E.terminal(120)).find(n => n.type === 'Raster' && n.props.key === 'strips-t')
+    const row = raster ? glyphs(raster.props.cells) : ''
+    const ok = /ctx 1k +0s/.test(row) && row.includes('(Explore · haiku 4.5 · low)')
+    return [`row "${row.replace(/[⠀-⣿]/g, '·').trim()}"`, ok]
+  },
+  // cc-mods: the band is repainted each wall-clock second, which starts every endless CSS loop over; a loop that whole
+  // seconds divide is at its first frame then anyway, so the restart does not show
+  async cc_loops_divide_the_second(E) {
+    await create(E)
+    E.tick(400)
+    await E.call({ id: 't', next: true })
+    await E.spawn('ag1', 'Scan tests')
+    E.tick(1000)
+    const sources = (await E.svgs()).map(p => p.source).join('')
+    const loops = [...sources.matchAll(/animation(?:-duration)?:\s*(?:[a-z]+\s+)?([\d.]+)(m?s)[^;}]*/g)]
+      .filter(m => /infinite/.test(m[0]) || m[0].startsWith('animation-duration'))
+      .map(m => Math.round(Number(m[1]) * (m[2] === 's' ? 1000 : 1)))
+    const bad = loops.filter(ms => 1000 % ms !== 0)
+    return [`loops ${loops.join(', ') || 'none'} ms; not dividing a second: ${bad.join(', ') || 'none'}`, loops.length >= 2 && bad.length === 0]
+  },
   async bars_survive_a_restart(E) {
     const kept = new Map()
     const first = await boot('./register.mjs', kept)
@@ -741,7 +800,8 @@ const C = {
     const anchored = /text-anchor="end"[^>]*>Read</.test(desk)
     const r = (await E.terminal(110)).find(n => n.type === 'Raster' && n.props.key === 'strips-t')
     const row = glyphs(r.props.cells).replace(/[⠀-⣿]/g, ' ')
-    const term = /architecture \(haiku 4\.5 · high\) +Read \d+s/.test(row)
+    // cc-mods: the context's room sits between the tool word and the time, blank until the first count
+    const term = /architecture \(haiku 4\.5 · high\) +Read +\d+s/.test(row)
     return [`desktop full name ${full}, tool at right ${anchored}, terminal ${term}`, full && anchored && term]
   },
   async agents_make_no_sounds(E) {

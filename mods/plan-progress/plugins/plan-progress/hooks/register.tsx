@@ -251,6 +251,15 @@ function liveClock(x: number, y: number, start: number, cls: string, anchor: 'en
 
 const stamp = (template: string, now: number) => template.replace(/\{\{T:(\d+)\}\}/g, (_, t: string) => elapsed(runFor(Number(t), now)))
 
+// cc-mods: every repaint starts a picture's endless CSS over from its first frame. A running band is repainted each
+// wall-clock second (beatOnTheSecond, and cache-timer's footer on the same second), so a loop that whole seconds
+// divide is back at its first frame just then and goes on unbroken; the head's twinkle (it was 1.9 to 3.3 s, cut off
+// and jumped back each second) runs in four groups a quarter second apart, the agent dot pulses once a second.
+// A repaint on another beat (a tool's timer in the desktop) still restarts them
+const TWINKLE_CSS = `.t0,.t1,.t2,.t3{animation:tw 1s ease-in-out infinite}.t1{animation-delay:-.25s}.t2{animation-delay:-.5s}.t3{animation-delay:-.75s}
+@keyframes tw{0%,100%{opacity:1}50%{opacity:.45}}
+@media (prefers-reduced-motion:reduce){.t0,.t1,.t2,.t3{animation:none}}`
+
 // a bar is drawn twice: the track itself as a plain picture, and a see-through layer on top for the hover parts
 // (checkpoint times, the pill's clock). That layer needs an interactive frame, and the desktop rebuilds such frames
 // on every redraw of the band; empty until hovered, the rebuild is invisible. A plan is immutable, so both drawings
@@ -394,12 +403,9 @@ function drawTrack(p: Plan, W: number): Track {
 .b0{fill:${buckets[0]?.color};fill-opacity:${buckets[0]?.opacity}}.b1{fill:${buckets[1]?.color};fill-opacity:${buckets[1]?.opacity}}
 .b2{fill:${buckets[2]?.color};fill-opacity:${buckets[2]?.opacity}}.b3{fill:${buckets[3]?.color};fill-opacity:${buckets[3]?.opacity}}
 .b4{fill:${buckets[4]?.color};fill-opacity:${buckets[4]?.opacity}}
-.t0,.t1,.t2,.t3{animation:tw 2.2s ease-in-out infinite}
-.t1{animation-duration:2.8s;animation-delay:-.7s}.t2{animation-duration:1.9s;animation-delay:-1.3s}.t3{animation-duration:3.3s;animation-delay:-.4s}
-@keyframes tw{0%,100%{opacity:1}50%{opacity:.45}}
+${TWINKLE_CSS}
 .kt{font:500 12px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:${INK}}
 .kc{font-weight:400;fill-opacity:.75}
-@media (prefers-reduced-motion:reduce){.t0,.t1,.t2,.t3{animation:none}}
 </style>`
   const hoverStyle = `<style>
 .tp{opacity:0;transition:opacity .12s;pointer-events:none}${tipRules.length ? `${tipRules.join(',')}{opacity:1}` : ''}
@@ -441,7 +447,7 @@ const wordCss = (to: number[], m: number) => Object.entries(WORD_CLASS).map(([c,
 // the desktop drops an Svg whose alt is empty, so every drawing says what it shows
 function stripAlt(p: Plan, key: string, hidden: AgentRun[]): string {
   const a = (p.agents ?? []).find(x => x.id === key)
-  return a ? `agent ${a.title}: ${a.state}, ${a.tool}` : `agents: ${tally(hidden)}`
+  return a ? `agent ${a.title}: ${a.state}, ${a.tool}${a.ctx !== undefined ? `, ${ctxText(a)}` : ''}` : `agents: ${tally(hidden)}`
 }
 
 // "3 running · 1 done": the agents a summary row stands for, by state, in a fixed order
@@ -508,6 +514,23 @@ const modelName = (m: string) => {
   return r ? `${r[1]} ${r[2]}.${r[3]}` : m
 }
 
+// cc-mods: what goes in the parenthesis after the name: the agent definition it runs as (left out for general-purpose,
+// the Agent tool's default, and without a plugin's prefix), then its model and effort
+const specOf = (a: AgentRun) => {
+  const role = (a.type ?? '').replace(/^[^:]*:/, '')
+  return [role === 'general-purpose' || role === a.title ? '' : role, a.model ? modelName(a.model) : '', a.effort ?? ''].filter(Boolean).join(' · ')
+}
+
+// cc-mods: the context an agent's last request carried. The engine reports no window for a subagent, and Claude Code
+// settles one from a model catalog a plugin cannot read (some models hold 1M without saying so), so the share is shown
+// only where the id itself names the window: [1m] asks for 1M (only CLAUDE_CODE_MAX_CONTEXT_TOKENS overrides it)
+const kTokens = (n: number) => (n >= 999_500 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n))
+const hasKnownWindow = (a: AgentRun) => a.model?.includes('[1m]') === true
+const ctxText = (a: AgentRun) =>
+  a.ctx === undefined ? '' : `ctx ${kTokens(a.ctx)}${hasKnownWindow(a) ? ` · ${Math.round((a.ctx / 1_000_000) * 100)}%` : ''}`
+// the room it keeps on a strip for its whole run, so the tool word never moves when the first count lands
+const ctxRoom = (a: AgentRun) => (hasKnownWindow(a) ? 'ctx 999k · 100%' : 'ctx 999k')
+
 // the agent's name, its model and effort in a dimmer parenthesis
 const nameMarkup = (name: string) => {
   const at = name.indexOf(' (')
@@ -556,12 +579,13 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
     const px = [...dots].map(([, d]) => `<path fill="${c}" fill-opacity=".32" d="${d}"/>`).join('')
     const isWordChanged = was !== undefined && was.tool !== word
     const flow = (attr: string) => (was && was.color !== c ? `<animate attributeName="${attr}" from="${was.color}" to="${c}" dur="${MORPH}" fill="freeze"/>` : '')
-    // the tool word sits at the right, just before the clock, so the name and its model get the rest of the row
-    const toolEnd = W - 9 - CLOCK_W - 10
+    // the tool word, the context (cc-mods) and the clock sit at the right, so the name and its model get the rest of the row
+    const ctxEnd = W - 9 - CLOCK_W - 10
+    const toolEnd = ctxEnd - textWidth(ctxRoom(a), 6.2) - 10
     const wordW = Math.max(word ? textWidth(word, 6.2) : 0, isWordChanged && was.tool ? textWidth(was.tool, 6.2) : 0)
     const nameX = GUTTER + 19 + indent
     const nameRoom = isNarrow ? SW - 24 - indent : toolEnd - (wordW > 0 ? wordW + 12 : 0) - nameX
-    const spec = [a.model ? modelName(a.model) : '', a.effort ?? ''].filter(Boolean).join(' · ')
+    const spec = specOf(a)
     const full = (a.depth > 0 ? '↳ ' : '') + a.title + (spec ? ` (${spec})` : '')
     let name = full
     while (name.length > 4 && textWidth(name, 6.2) > nameRoom) name = name.slice(0, -1)
@@ -574,6 +598,7 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
       ? ''
       : (isWordChanged && was.tool ? `<text x="${toolEnd}" y="${y + 11.5}" text-anchor="end" class="sn mo ${WORD_CLASS[was.color] ?? ''}">${esc(was.tool)}</text>` : '') +
         (word ? `<text x="${toolEnd}" y="${y + 11.5}" text-anchor="end" class="sn${isWordChanged ? ' mi' : ''} ${WORD_CLASS[c] ?? ''}">${esc(word)}</text>` : '') +
+        (a.ctx !== undefined ? `<text x="${ctxEnd}" y="${y + 11.5}" text-anchor="end" class="sn st nm">${esc(ctxText(a))}</text>` : '') +
         time
     const html =
       gutter(y, String(all.indexOf(a) + 1)) +
@@ -603,16 +628,14 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
   return rows
 }
 
-const STRIP_STYLE = `<style>.sn{font:400 11.5px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#FAF9F5}.st{fill-opacity:.65}.sg{font-weight:500;font-variant-numeric:tabular-nums}
+const STRIP_STYLE = `<style>.sn{font:400 11.5px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#FAF9F5}.st{fill-opacity:.65}.sg{font-weight:500;font-variant-numeric:tabular-nums}.nm{font-variant-numeric:tabular-nums}
 .gi{stroke:#9C9A92}.sn.gl{fill:#9C9A92}.gi.gm{stroke:#8C8A82}.sn.gl.gm{fill:#8C8A82}${wordCss([255, 255, 255], 0.45)}
 @media (prefers-color-scheme:light){.sn{fill:#141413}.gi,.gi.gm{stroke:#73726C}.sn.gl,.sn.gl.gm{fill:#73726C}${wordCss([0, 0, 0], 0.35)}}
-.sd{animation:sp 1.1s ease-in-out infinite}@keyframes sp{50%{opacity:.3}}
+.sd{animation:sp 1s ease-in-out infinite}@keyframes sp{50%{opacity:.3}}
 .mi{animation:mi ${MORPH} ease-out both}@keyframes mi{from{opacity:0;filter:blur(3px)}}
 .mo{animation:mo ${MORPH} ease-in both}@keyframes mo{to{opacity:0;filter:blur(3px)}}
-.t0,.t1,.t2,.t3{animation:tw 2.2s ease-in-out infinite}.t1{animation-duration:2.8s;animation-delay:-.7s}.t2{animation-duration:1.9s;animation-delay:-1.3s}.t3{animation-duration:3.3s;animation-delay:-.4s}
-@keyframes tw{0%,100%{opacity:1}50%{opacity:.45}}
 ${CLOCK_CSS}
-@media (prefers-reduced-motion:reduce){.sd,.mi,.mo,.t0,.t1,.t2,.t3{animation:none}.mo{opacity:0}}</style>`
+@media (prefers-reduced-motion:reduce){.sd,.mi,.mo{animation:none}.mo{opacity:0}}</style>`
 
 function plural(n: number, word: string) {
   return `${n} ${word}${n === 1 ? '' : 's'}`
@@ -813,13 +836,17 @@ function stripCells(v: { shown: AgentRun[]; hidden: AgentRun[] }, W: number, now
     const time = elapsed(runFor(a.startedAt, a.endedAt ?? now))
     const narrow = W < 30
     const tx = W - 2 - time.length
-    // the tool word sits at the right, just before the time, so the name and its model get the rest of the row
+    // cc-mods: the context sits just before the time, in a room kept for the whole run; a row too short for it goes without
+    const room = W >= 48 ? cellsOf(ctxRoom(a)) : 0
+    const ctx = room ? ctxText(a) : ''
+    const cx = room ? tx - 1 - room : tx
+    // the tool word sits at the right, before the context and the time, so the name and its model get the rest of the row
     const word = narrow || !running ? '' : fit(a.tool, Math.max(0, Math.floor(W * 0.25)))
-    const toolAt = tx - 1 - word.length
+    const toolAt = cx - 1 - word.length
     let at = 4 + indent
-    const spec = [a.model ? modelName(a.model) : '', a.effort ?? ''].filter(Boolean).join(' · ')
+    const spec = specOf(a)
     const full = (a.depth > 0 ? '↳ ' : '') + a.title + (spec ? ` (${spec})` : '')
-    const name = fit(full, Math.max(3, (narrow ? W - 2 : word ? toolAt - 1 : tx - 1) - at))
+    const name = fit(full, Math.max(3, (narrow ? W - 2 : word ? toolAt - 1 : cx - 1) - at))
     // the model and effort are drawn dimmer than the name
     const cut = spec ? name.indexOf(' (') : -1
     const head = cut > 0 ? name.slice(0, cut) : name
@@ -831,6 +858,7 @@ function stripCells(v: { shown: AgentRun[]; hidden: AgentRun[] }, W: number, now
       for (let i = -1; i <= word.length; i++) g.set(toolAt + i, y, ' ', DEFAULT, pack(tint))
       g.text(toolAt, y, word, pack(c), pack(tint))
     }
+    if (ctx) g.text(cx + room - cellsOf(ctx), y, ctx, pack(mix(termFg(), tint, 0.35)), pack(tint))
     for (let i = -1; i < time.length; i++) g.set(tx + i, y, ' ', DEFAULT, pack(tint))
     g.text(tx, y, time, pack(mix(termFg(), tint, 0.35)), pack(tint))
   })
@@ -1518,6 +1546,7 @@ export const register: Register = on => {
       state: 'running',
       tool: 'Starting',
       model: started.model,
+      type: e.subagentType,
       startedAt: now,
       endedAt: null,
       depth: parentHome ? 1 : 0,
@@ -1569,8 +1598,15 @@ export const register: Register = on => {
       const known = (await read($, plans)).flatMap(p => p.agents ?? []).find(a => a.id === agentId)
       if (known && (known.model !== e.model || known.effort !== effort)) await editAgent($, agentId, a => ({ ...a, model: e.model, effort }))
     }
+    const result = yield* next(e)
+    // cc-mods: each response says how much context its request carried, the input side as the status line counts it
+    const usage = result.usage
+    if (agentId && usage && agentHome.has(agentId)) {
+      const ctx = usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
+      await editAgent($, agentId, a => ({ ...a, ctx }))
+    }
 
-    return yield* next(e)
+    return result
   })
 
   on('turn.complete', async ($, e, next) => {
