@@ -338,7 +338,7 @@ const C = {
     E.tick(83_000)
     await E.call({ id: 't', next: true })
     const { card } = await E.view('t')
-    return [JSON.stringify(card), card[0] === 'One · step 2 of 2 · 1m 23s' && card[1] === 'A · 1m 23s']
+    return [JSON.stringify(card), card[0] === 'One · step 2 of 2 · 1m' && card[1] === 'A · 1m 23s']
   },
   // the card lists each finished step and how long it took, the latest last, at most six with the rest counted
   async cc_hover_card_lists_finished_steps(E) {
@@ -357,7 +357,7 @@ const C = {
     const many = (await E.view('m')).card
     return [
       `${JSON.stringify(three)}; ${JSON.stringify(many)}`,
-      JSON.stringify(three) === JSON.stringify(['Two · step 1 of 1 · 35s', 'A · 10s', 'B · 25s']) &&
+      JSON.stringify(three) === JSON.stringify(['Two · step 1 of 1 · <1m', 'A · 10s', 'B · 25s']) &&
         many.length === 8 && many[1] === '2 earlier steps' && many[2] === 's3 · 1s' && many[7] === 's8 · 1s',
     ]
   },
@@ -384,24 +384,39 @@ const C = {
     const runsByItself = s => s.includes('--d:') || /animation:[^;}]*var\(--d\)/.test(s)
     return [
       `redrawn on the second ${isRedrawn}; strip reads ${clock(v.strips[0])}, card ${v.card[0]}; a clock running by itself ${runsByItself(v.strips[0])}`,
-      isRedrawn && clock(v.strips[0]) === '1m 23s' && v.card[0]?.endsWith(' · 1m 23s') && !runsByItself(v.strips[0]),
+      isRedrawn && clock(v.strips[0]) === '1m 23s' && v.card[0]?.endsWith(' · 1m') && !runsByItself(v.strips[0]),
     ]
   },
-  // cc-mods: the beat draws the band again only while a running clock shows: a finished bar's time stands still
-  async cc_no_beat_without_a_running_clock(E) {
+  // cc-mods: the beat draws the band again each second only while a strip's clock runs; a running bar's hover card
+  // counts minutes, so it brings a redraw once its minute turns, and a finished bar none. A host hover card redrawn
+  // as the pointer leaves can stay behind on the desktop, so the band is drawn no more often than it must be
+  async cc_beat_only_when_the_time_shown_moves(E) {
+    const beat = async () => {
+      const before = tickOf(E)
+      await E.fireTimers()
+      return tickOf(E) !== before
+    }
     await create(E)
     E.tick(5000)
     await E.call({ id: 't', state: 'done' })
     await E.view('t')
-    const before = tickOf(E)
     E.tick(1000)
-    await E.fireTimers()
-    const isIdle = tickOf(E) === before
-    await create(E, 'u', three(), 'Other') // a running bar: its hover card carries the time
+    const done = await beat()
+    await create(E, 'u', three(), 'Other')
     await E.view('u')
-    await E.fireTimers()
-    const isLive = tickOf(E) !== before
-    return [`done bar alone redrawn ${!isIdle}, with a running bar ${isLive}`, isIdle && isLive]
+    E.tick(1000)
+    const sameMinute = await beat()
+    E.tick(60_000)
+    const minuteTurned = await beat()
+    await E.view('u')
+    await E.spawn('ag1', 'Scan tests')
+    await E.view('u')
+    E.tick(1000)
+    const agentClock = await beat()
+    return [
+      `done bar ${done}, running bar within its minute ${sameMinute}, when its minute turns ${minuteTurned}, with a running agent ${agentClock}`,
+      !done && !sameMinute && minuteTurned && agentClock,
+    ]
   },
   async strips_clock_live_then_static(E) {
     await create(E)

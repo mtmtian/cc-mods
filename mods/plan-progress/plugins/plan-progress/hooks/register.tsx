@@ -225,17 +225,22 @@ function stepTimes(p: Plan): { steps: Map<PlanStep, number>; stages: (number | u
   return { steps, stages }
 }
 
-// cc-mods: what a bar shows on hover, as the host's own hover card over the track: it stays while the pointer does,
-// whatever the band's redraws. Upstream drew it in a frame over the track, and the desktop rebuilds a frame on every
-// redraw, so with the clocks' redraw each second it flashed and went. The plan's time so far, then each finished step
-// and how long it took, the latest last
+// cc-mods: what a bar shows on hover, as the host's own hover card over the track: it stays while the pointer does.
+// Upstream drew it in a frame over the track, and the desktop rebuilds a frame on every redraw, so with the clocks'
+// redraw each second it flashed and went. A card the desktop redraws as the pointer leaves can stay behind, so its
+// time counts whole minutes and the card changes once a minute at most. The plan's time so far, then each finished
+// step and how long it took, the latest last
 const CARD_STEPS = 6
+const minutesRun = (ms: number) => {
+  const m = Math.floor(ms / 60_000)
+  return m < 1 ? '<1m' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`
+}
 function hoverCard(p: Plan, now: number): { head: string; lines: string[] } {
   const w = where(p)
   const head =
     p.state === 'done'
       ? `Done · ${plural(w.total, 'step')}${p.endedAt ? ` · ${elapsed(runFor(p.startedAt, p.endedAt))}` : ''}`
-      : `${p.stages[w.stage]?.name ?? ''} · step ${w.step} of ${w.stageSize} · ${elapsed(runFor(p.startedAt, now))}`
+      : `${p.stages[w.stage]?.name ?? ''} · step ${w.step} of ${w.stageSize} · ${minutesRun(runFor(p.startedAt, now))}`
   const took = stepTimes(p).steps
   const finished = [...took].sort(([a], [b]) => (a.doneAt ?? 0) - (b.doneAt ?? 0))
   const lines = finished.slice(-CARD_STEPS).map(([step, ms]) => `${step.title} · ${elapsed(ms)}`)
@@ -828,15 +833,20 @@ const isGliding = (p: Plan, t: number) => {
 }
 const isAnimated = (p: Plan, t: number) => (isTurnLive && p.state === 'running') || hasRunningAgents(p) || isGliding(p, t)
 
-// cc-mods: whether the band last drawn on the desktop shows a running clock (a running strip, a hover card's);
-// while it does, the band is drawn again just after each wall-clock second, so its clocks step with the time
+// cc-mods: what the band last drawn on the desktop shows of the time moving on: a running strip's clock, which steps
+// each second, and the hover cards' minutes (null when the desktop draws no band). Just after each wall-clock second
+// the band is drawn again while a clock runs or a card's minute has turned
 let hasLiveClock = false
+let drawnCards: string | null = null
+const cardHeads = (list: readonly Plan[], now: number) => list.map(p => hoverCard(p, now).head).join('\n')
 let isBeating = false
 function beatOnTheSecond($: EngineInterface, now: number) {
   isBeating = true
   $.clock.after(1000 - (now % 1000) + 25, async () => {
-    if (hasLiveClock && (await read($, isOpen))) await update($, tick, n => n + 1)
-    beatOnTheSecond($, await $.clock.now())
+    const t = await $.clock.now()
+    const isDue = hasLiveClock || (drawnCards !== null && cardHeads(await read($, plans), t) !== drawnCards)
+    if (isDue && (await read($, isOpen))) await update($, tick, n => n + 1)
+    beatOnTheSecond($, t)
   })
 }
 
@@ -1282,6 +1292,7 @@ export const register: Register = on => {
     if (list.length === 0 || e.props.hasSurvey || !(await read($, isOpen))) {
       band = null
       hasLiveClock = false
+      drawnCards = null
       return next(e)
     }
     if (e.surface === 'terminal') {
@@ -1294,6 +1305,7 @@ export const register: Register = on => {
       const trackW = Math.max(12, Math.min(512, cols - titleW - (hasClicks ? 15 : 13)))
       band = { requestId: e.requestId, W: trackW, list }
       hasLiveClock = false
+      drawnCards = null
       return (
         <Box flexDirection="column">
           {list.map(p => {
@@ -1346,7 +1358,7 @@ export const register: Register = on => {
     const isFoldable = (p: Plan) => Svg !== null && (visibleAgents(p, now, budget, false)?.hidden.length ?? 0) > 0
     const trackW = Math.max(120, Math.min(1400, total - titleWidth - 140 - (Svg !== null ? TOGGLE_W : 0)))
     const toggle = (id: string) => update($, expanded, ids => (ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]))
-    // what this draw stamps; a running clock in it (a strip's, a hover card's) keeps the band drawn again on each second
+    // what this draw stamps; a running strip clock in it keeps the band drawn again on each second
     let isLive = false
     const draw = (template: string) => {
       if (template.includes('{{T:')) isLive = true
@@ -1360,8 +1372,6 @@ export const register: Register = on => {
       const v = visibleAgents(p, now, budget, isExpanded)
       const track = trackSvg(p, trackW, now)
       const card = hoverCard(p, now)
-      // the card of an unfinished bar counts its time
-      if (p.state !== 'done') isLive = true
       const strips = v && Svg
         ? stripsSvg(v, p.agents ?? [], trackW, now).map(r => (
             <Svg
@@ -1426,6 +1436,7 @@ export const register: Register = on => {
       ]
     })
     hasLiveClock = isLive
+    drawnCards = cardHeads(list, now)
 
     return (
       <Box flexDirection="column" gap={1}>
