@@ -19,8 +19,8 @@ const stripBudget = (bars: number) => (bars >= 3 ? 3 : bars === 2 ? 4 : 5)
 const FOLD_MS = 5000 // finished strips stay this long, failed ones stay until the bar closes
 const DONE_LINGER_MS = 60_000 // a finished bar goes away on its own after this; a failed one waits for its ✕
 const HEAD_TWINKLE = 48 // px behind the head of a running bar that still twinkle; the rest of the fill holds still
-const TOGGLE_W = 32 // px the agents button (▾ / ▴) takes at the end of a bar's last agent row; every strip leaves it
-// free, so the button appearing with a second agent never moves a strip under the person's eyes
+const TOGGLE_W = 32 // px the agents button (▾ 4 / ▴) takes after a title; reserved on every desktop row, so a button
+// appearing with a second agent never narrows the tracks under the person's eyes
 
 // the desktop app's own tokens, so the band reads as part of it: running in the brand clay (--accent-brand), waiting on
 // the person in its accent blue (--accent-100), error and done in its danger and success (light theme's -100).
@@ -1361,12 +1361,11 @@ export const register: Register = on => {
     const now = await $.clock.now()
     const opened = await read($, expanded)
     const budget = stripBudget(list.length)
-    // a bar gets the agents button when folding hides some of its agents. It sits at the end of the bar's last agent
-    // row (the summary row while folded), in a column the strips always leave free, so the button coming and going
-    // never moves a strip, and the tracks stay pinned right, all the same width
+    // a bar gets the agents button when folding hides some of its agents; the button sits left of the spacer,
+    // so the tracks stay pinned right, all the same width. cc-mods: never in the track's column, where the desktop's
+    // native button, far wider than its room, widened the column and pushed the title, percent and ✕ out of the band
     const isFoldable = (p: Plan) => Svg !== null && (visibleAgents(p, now, budget, false)?.hidden.length ?? 0) > 0
-    const trackW = Math.max(120, Math.min(1400, total - titleWidth - 140))
-    const stripW = trackW - TOGGLE_W
+    const trackW = Math.max(120, Math.min(1400, total - titleWidth - 140 - (Svg !== null ? TOGGLE_W : 0)))
     const toggle = (id: string) => update($, expanded, ids => (ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]))
     // what this draw stamps; a running clock in it keeps the band drawn again on each second
     let isLive = false
@@ -1382,28 +1381,16 @@ export const register: Register = on => {
       const v = visibleAgents(p, now, budget, isExpanded)
       const track = trackSvg(p, trackW, now)
       const hover = draw(track.overlay)
-      const canFold = isFoldable(p)
       const strips = v && Svg
-        ? stripsSvg(v, p.agents ?? [], stripW, now).map((r, j, rows) => {
-            const strip = (
-              <Svg
-                key={`strip-${p.id}-${r.key}`}
-                source={draw(`<svg xmlns="http://www.w3.org/2000/svg" width="${stripW}" height="${r.height}">${STRIP_STYLE}${r.html}</svg>`)}
-                alt={stripAlt(p, r.key, v.hidden)}
-                width={stripW}
-                height={r.height}
-              />
-            )
-            if (j < rows.length - 1 || !canFold) return strip
-            return (
-              <Box key={`fold-${p.id}`} flexDirection="row" alignItems="flex-end">
-                {strip}
-                <Box width={TOGGLE_W} justifyContent="center">
-                  <Button key={`agents-${p.id}`} plain dimColor label={isExpanded ? '▴' : '▾'} onPress={() => toggle(p.id)} />
-                </Box>
-              </Box>
-            )
-          })
+        ? stripsSvg(v, p.agents ?? [], trackW, now).map(r => (
+            <Svg
+              key={`strip-${p.id}-${r.key}`}
+              source={draw(`<svg xmlns="http://www.w3.org/2000/svg" width="${trackW}" height="${r.height}">${STRIP_STYLE}${r.html}</svg>`)}
+              alt={stripAlt(p, r.key, v.hidden)}
+              width={trackW}
+              height={r.height}
+            />
+          ))
         : []
       const agentsAlt = v ? `; agents: ${(p.agents ?? []).map(a => `${a.title} ${a.state}`).join(', ')}` : ''
       const line = i > 0 && Svg ? [<Svg key={`div-${p.id}`} source={divider} alt="divider" width={total} height={1} />] : []
@@ -1426,6 +1413,9 @@ export const register: Register = on => {
             <Text color={color}>{STATE_GLYPH[p.state]}</Text>
           )}
           <Text wrap="truncate">{p.title}</Text>
+          {isFoldable(p) ? (
+            <Button key={`agents-${p.id}`} plain dimColor label={isExpanded ? '▴' : `▾ ${p.agents?.length ?? 0}`} onPress={() => toggle(p.id)} />
+          ) : null}
           <Box flexGrow={1} />
           {Svg ? (
             <Box flexDirection="column" flexShrink={0}>
