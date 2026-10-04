@@ -512,7 +512,7 @@ const nameMarkup = (name: string) => {
 
 // one tinted strip per agent behind a bot icon and its number: the colour says how it went,
 // the word says what it does now (only while it runs or waits), the time how long it took
-type StripRow = { key: string; html: string; height: number }
+type StripRow = { key: string; html: string; height: number; isMorphing: boolean }
 
 // each strip is its own drawing, so a change to one agent redraws that strip alone, never the bar or the others
 function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[], W: number, now: number): StripRow[] {
@@ -535,7 +535,7 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
     const rowKey = `${W}|${y}|${all.indexOf(a)}|${was ? 'morph' : ''}`
     const cachedRow = drawnRows.get(a)
     if (cachedRow?.key === rowKey) {
-      rows.push({ key: a.id, html: cachedRow.html, height: y + STRIP_H })
+      rows.push({ key: a.id, html: cachedRow.html, height: y + STRIP_H, isMorphing: was !== undefined })
       return
     }
     const indent = a.depth > 0 ? 10 : 0
@@ -578,7 +578,7 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
       `<text x="${nameX}" y="${y + 11.5}" class="sn">${nameMarkup(name)}</text>` +
       tool
     drawnRows.set(a, { key: rowKey, html })
-    rows.push({ key: a.id, html, height: y + STRIP_H })
+    rows.push({ key: a.id, html, height: y + STRIP_H, isMorphing: was !== undefined })
   })
   if (v.hidden.length > 0) {
     // one grey row for the agents without a strip; a live dot while any of them runs
@@ -588,6 +588,7 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
     rows.push({
       key: '+',
       height: y + STRIP_H,
+      isMorphing: false,
       html:
         gutter(y, v.shown.length === 0 ? String(v.hidden.length) : `+${v.hidden.length}`, true) +
         `<rect x="${GUTTER}" y="${y}" width="${SW}" height="${STRIP_H}" rx="${STRIP_H / 2}" fill="#8C8A82" fill-opacity=".14"/>` +
@@ -858,6 +859,21 @@ function beatOnTheSecond($: EngineInterface, now: number) {
   $.clock.after(1000 - (now % 1000) + 25, async () => {
     if (hasLiveClock && (await read($, isOpen))) await update($, tick, n => n + 1)
     beatOnTheSecond($, await $.clock.now())
+  })
+}
+
+// cc-mods: a one-shot animation (the head's slide to a new step, a strip's morph) plays again each time the desktop
+// shows its drawing afresh, and only the next draw takes it out (trackSvg, stripsSvg). A running clock brings that draw
+// within a second; a finished bar has none, so its slide to the end stayed the band's last answer, and each repaint
+// that never reached the mod (cache-timer's footer second) flashed its head back to the step it came from. A draw that
+// holds one is followed by another as soon as it has played
+let isSettling = false
+function drawAgainOncePlayed($: EngineInterface) {
+  if (isSettling) return
+  isSettling = true
+  $.clock.after(Math.max(GLIDE_MS, MORPH_MS) + 25, async () => {
+    isSettling = false
+    if (await read($, isOpen)) await update($, tick, n => n + 1)
   })
 }
 
@@ -1369,6 +1385,7 @@ export const register: Register = on => {
     const toggle = (id: string) => update($, expanded, ids => (ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]))
     // what this draw stamps; a running clock in it keeps the band drawn again on each second
     let isLive = false
+    let isPlaying = false
     const draw = (template: string) => {
       if (template.includes('{{T:')) isLive = true
       return stamp(template, now)
@@ -1381,8 +1398,10 @@ export const register: Register = on => {
       const v = visibleAgents(p, now, budget, isExpanded)
       const track = trackSvg(p, trackW, now)
       const hover = draw(track.overlay)
+      const rows = v && Svg ? stripsSvg(v, p.agents ?? [], trackW, now) : []
+      if (track.isGliding || rows.some(r => r.isMorphing)) isPlaying = true
       const strips = v && Svg
-        ? stripsSvg(v, p.agents ?? [], trackW, now).map(r => (
+        ? rows.map(r => (
             <Svg
               key={`strip-${p.id}-${r.key}`}
               source={draw(`<svg xmlns="http://www.w3.org/2000/svg" width="${trackW}" height="${r.height}">${STRIP_STYLE}${r.html}</svg>`)}
@@ -1440,6 +1459,7 @@ export const register: Register = on => {
       ]
     })
     hasLiveClock = isLive
+    if (isPlaying) drawAgainOncePlayed($)
 
     return (
       <Box flexDirection="column" gap={1}>
