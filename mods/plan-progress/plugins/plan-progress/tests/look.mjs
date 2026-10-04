@@ -1,4 +1,4 @@
-// renders the bars as the desktop draws them: the track in a sandboxed frame, strips as images
+// renders the bars as the desktop draws them: the track and strips as images, the hover card's lines under them
 import fs from 'node:fs'
 import { boot, S, st } from './engine.mjs'
 const E = await boot('./register.mjs')
@@ -13,8 +13,8 @@ const svgs = await E.svgs()
 const html = E.plans().map(p => {
   const v = svgs.filter(s => s.alt.startsWith(p.title + ':') || String(s.key ?? '').startsWith(`strip-${p.id}-`))
   const track = v[0], strips = v.slice(1)
-  const overlay = svgs.slice(svgs.indexOf(track) + 1).find(s => s.isInteractive)
-  return `<div style="position:relative;margin:8px 0">${img(track.source, track.width, track.height)}${strips.map(s => img(s.source, s.width, s.height)).join('')}` +
-    `<iframe sandbox="" srcdoc="${esc(overlay.source)}" width="${overlay.width}" height="${overlay.height}" style="border:0;position:absolute;top:0;left:0"></iframe></div>`
+  return `<div style="margin:8px 0">${img(track.source, track.width, track.height)}${strips.map(s => img(s.source, s.width, s.height)).join('')}</div>`
 }).join('')
-fs.writeFileSync('look.html', `<!doctype html><html style="color-scheme:dark"><head><meta charset="utf-8"></head><body style="background:#1f1e1d;padding:10px;zoom:1.3">${html}</body></html>`)
+const cards = await Promise.all(E.plans().map(async p => (await E.view(p.id)).card))
+const hover = cards.map(lines => `<pre style="color:#c8c6be;font:12px ui-sans-serif,system-ui;margin:4px 0 12px">${lines.map(esc).join('\n')}</pre>`).join('')
+fs.writeFileSync('look.html', `<!doctype html><html style="color-scheme:dark"><head><meta charset="utf-8"></head><body style="background:#1f1e1d;padding:10px;zoom:1.3">${html}${hover}</body></html>`)
