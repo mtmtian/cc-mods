@@ -443,7 +443,7 @@ const C = {
     await E.turnComplete('ag2', 'error')
     const folded = await E.view('t')
     const btn = (await E.buttons()).find(b => b.key === 'agents-t')
-    const foldedOk = folded.strips.length === 2 && folded.strips[0].includes('Agent ag2') && folded.strips[1].includes('3 more agents · 3 running') && btn?.label === '▾'
+    const foldedOk = folded.strips.length === 2 && folded.strips[0].includes('Agent ag2') && folded.strips[1].includes('3 more agents · 3 running') && btn?.label === '▾ 4'
     await E.press('agents-t')
     const open = await E.view('t')
     const openOk = open.strips.length === 4 && (await E.buttons()).find(b => b.key === 'agents-t')?.label === '▴'
@@ -451,33 +451,32 @@ const C = {
     const back = (await E.view('t')).strips.length === 2
     return [`lone ${loneOk}, folded ${folded.strips.length} rows (${btn?.label}), opened ${open.strips.length}, folded again ${back}`, loneOk && foldedOk && openOk && back]
   },
-  // cc-mods: the ▾ sat after the title, read as a count and far from the rows it opens; it ends the bar's last agent
-  // row (the summary row while folded) in a column every strip leaves free, so no strip moves when it appears
-  async cc_fold_button_ends_the_last_agent_row(E) {
+  // cc-mods: the ▾ sits in the title row. Moved to the end of the last agent row, inside the track's column, the
+  // desktop's native button came out far wider than its room: the column widened and pushed the bar's title, percent
+  // and ✕ out of the band. The track's column holds drawings alone, each as wide as the track
+  async cc_fold_button_stays_out_of_the_track_column(E) {
     await create(E)
-    await E.spawn('ag1', 'Lone agent')
-    const widths = async () => nodes(await E.tree(), n => n.type === 'Svg' && String(n.props.key).startsWith('strip-t-')).map(n => n.props.width)
-    const lone = await widths()
-    for (const id of ['ag2', 'ag3']) await E.spawn(id, `Agent ${id}`)
-    const row = async () => {
+    for (const id of ['ag1', 'ag2', 'ag3']) await E.spawn(id, `Agent ${id}`)
+    const check = async () => {
       const tree = await E.tree()
-      const fold = nodes(tree, n => n.type === 'Box' && n.props.key === 'fold-t')[0]
-      const strip = nodes(fold?.children ?? [], n => n.type === 'Svg')[0]?.props.key
-      const button = nodes(fold?.children ?? [], n => n.type === 'Button')[0]?.props.label
       const bar = nodes(tree, n => n.type === 'Box' && n.props.key === 'bar-t')[0]
-      // the title row's own children, the track column apart
-      const besideTitle = (bar?.children ?? []).flat().some(n => n?.type === 'Button' && n.props.key === 'agents-t')
-      return { strip, button, besideTitle }
+      const row = (bar?.children ?? []).flat()
+      const column = row.find(n => n?.type === 'Box' && n.props.flexDirection === 'column')
+      const inColumn = nodes(column?.children ?? [], () => true).map(n => n.type)
+      const track = nodes(column?.children ?? [], n => n.type === 'Svg')[0]?.props.width
+      const strips = nodes(column?.children ?? [], n => n.type === 'Svg' && String(n.props.key).startsWith('strip-t-')).map(n => n.props.width)
+      return {
+        byTitle: row.some(n => n?.type === 'Button' && n.props.key === 'agents-t'),
+        onlyDrawings: inColumn.every(t => t === 'Box' || t === 'Svg'),
+        sameWidth: strips.length > 0 && strips.every(w => w === track),
+      }
     }
-    const folded = await row()
-    const foldedWidths = await widths()
+    const folded = await check()
     await E.press('agents-t')
-    const open = await row()
-    const track = nodes(await E.tree(), n => n.type === 'Svg' && String(n.props.alt).startsWith('Task:'))[0]?.props.width
-    const isSteady = lone.length === 1 && foldedWidths.every(w => w === lone[0]) && lone[0] < track
+    const open = await check()
     return [
-      `folded: ${folded.button} after ${folded.strip}; opened: ${open.button} after ${open.strip}; by the title ${folded.besideTitle || open.besideTitle}; strips ${lone[0]}px → ${foldedWidths.join('/')}px, track ${track}px`,
-      folded.strip === 'strip-t-+' && folded.button === '▾' && open.strip === 'strip-t-ag3' && open.button === '▴' && !folded.besideTitle && !open.besideTitle && isSteady,
+      `folded ${JSON.stringify(folded)}; opened ${JSON.stringify(open)}`,
+      [folded, open].every(c => c.byTitle && c.onlyDrawings && c.sameWidth),
     ]
   },
   // cc-mods: the agents button appearing with a second agent leaves the track width alone
