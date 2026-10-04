@@ -325,6 +325,50 @@ const C = {
       isGlide(at) && !isGlide(later) && isGlide(done) && !isGlide(doneLater),
     ]
   },
+  // cc-mods: only a draw after the slide takes it out of the picture, and a finished bar has no running clock to bring
+  // one. A bar at 4 of 6 that finished kept its slide as the band's last answer, and each repaint that never reached
+  // the mod (cache-timer's footer second) flashed its head back to 4 of 6. The mod draws the band once more itself
+  async cc_done_slide_is_drawn_out(E) {
+    await create(E, 't', [S('One', st('A', 'active'), 'B', 'C'), S('Two', 'D', 'E', 'F')])
+    for (let i = 0; i < 4; i++) await E.call({ id: 't', next: true })
+    await E.view('t')
+    await E.call({ id: 't', state: 'done' })
+    const done = (await E.view('t')).track
+    const before = tickOf(E)
+    E.tick(500)
+    await E.fireTimers()
+    const isRedrawn = tickOf(E) !== before
+    const last = (await E.view('t')).track
+    const settled = tickOf(E)
+    E.tick(1000)
+    await E.fireTimers()
+    const isOnce = tickOf(E) === settled
+    const isGlide = s => s.includes('<animate attributeName="width"')
+    return [
+      `slide at done ${isGlide(done)}; drawn again after it ${isRedrawn}, that answer slides ${isGlide(last)}, then left alone ${isOnce}`,
+      isGlide(done) && isRedrawn && !isGlide(last) && isOnce,
+    ]
+  },
+  // cc-mods: the same for the last agent's strip on a finished bar: its morph to done flashed the old word on each
+  // repaint until the strips folded 5 s later
+  async cc_last_strip_morph_is_drawn_out(E) {
+    await create(E)
+    await E.spawn('ag1', 'Scan tests')
+    await E.call({ id: 't', state: 'done' })
+    await E.view('t')
+    E.tick(1000)
+    await E.fireTimers()
+    await E.view('t')
+    await E.turnComplete('ag1')
+    const at = (await E.view('t')).strips[0] ?? ''
+    const before = tickOf(E)
+    E.tick(500)
+    await E.fireTimers()
+    const isRedrawn = tickOf(E) !== before
+    const last = (await E.view('t')).strips[0] ?? ''
+    const isMorph = s => s.includes(' mo ') || s.includes('<animate ')
+    return [`morph at the finish ${isMorph(at)}; drawn again after it ${isRedrawn}, that answer morphs ${isMorph(last)}`, isMorph(at) && isRedrawn && !isMorph(last)]
+  },
   async running_pill_has_live_clock(E) {
     await create(E)
     E.tick(83_000)
