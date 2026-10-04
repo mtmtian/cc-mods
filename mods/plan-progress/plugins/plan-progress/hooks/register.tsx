@@ -225,29 +225,6 @@ function stepTimes(p: Plan): { steps: Map<PlanStep, number>; stages: (number | u
   return { steps, stages }
 }
 
-// cc-mods: what a bar shows on hover, as the host's own hover card over the track: it stays while the pointer does.
-// Upstream drew it in a frame over the track, and the desktop rebuilds a frame on every redraw, so with the clocks'
-// redraw each second it flashed and went. A card the desktop redraws as the pointer leaves can stay behind, so its
-// time counts whole minutes and the card changes once a minute at most. The plan's time so far, then each finished
-// step and how long it took, the latest last
-const CARD_STEPS = 6
-const minutesRun = (ms: number) => {
-  const m = Math.floor(ms / 60_000)
-  return m < 1 ? '<1m' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`
-}
-function hoverCard(p: Plan, now: number): { head: string; lines: string[] } {
-  const w = where(p)
-  const head =
-    p.state === 'done'
-      ? `Done · ${plural(w.total, 'step')}${p.endedAt ? ` · ${elapsed(runFor(p.startedAt, p.endedAt))}` : ''}`
-      : `${p.stages[w.stage]?.name ?? ''} · step ${w.step} of ${w.stageSize} · ${minutesRun(runFor(p.startedAt, now))}`
-  const took = stepTimes(p).steps
-  const finished = [...took].sort(([a], [b]) => (a.doneAt ?? 0) - (b.doneAt ?? 0))
-  const lines = finished.slice(-CARD_STEPS).map(([step, ms]) => `${step.title} · ${elapsed(ms)}`)
-  if (finished.length > CARD_STEPS) lines.unshift(plural(finished.length - CARD_STEPS, 'earlier step'))
-  return { head, lines }
-}
-
 // the 2 px dots of one look go into one path: a fraction of the markup of a rect each, and one node instead of thousands
 function addDot(dots: Map<string, string>, cls: string, x: number, y: number) {
   dots.set(cls, `${dots.get(cls) ?? ''}M${x} ${y}h2v2h-2z`)
@@ -255,6 +232,9 @@ function addDot(dots: Map<string, string>, cls: string, x: number, y: number) {
 
 // last drawn head position per plan, so a redraw glides from where the bar was
 const lastHead = new Map<string, number>()
+
+// the track draws in a sandboxed frame (for hover); its page must stay see-through in either theme
+const SEE_THROUGH = '<style>:root,html,body{background:transparent!important;color-scheme:light dark;margin:0;overflow:hidden}svg{display:block}</style>'
 
 // cc-mods: a running clock is plain text, written at every draw ({{T:start}}, stamp), and the band is drawn again on
 // each wall-clock second while one shows (beatOnTheSecond). The desktop shows a band's last answer again, restarting
@@ -265,16 +245,18 @@ const CLOCK_CSS = '.ck{font-variant-numeric:tabular-nums}'
 // whole wall-clock seconds, so every clock on the band steps at the same instant, the one the band is drawn again at
 const runFor = (start: number, end: number) => Math.max(0, Math.floor(end / 1000) - Math.floor(start / 1000)) * 1000
 
-function liveClock(x: number, y: number, start: number, cls: string): string {
-  return `<text x="${x.toFixed(1)}" y="${y}" text-anchor="end" class="${cls} ck">{{T:${start}}}</text>`
+function liveClock(x: number, y: number, start: number, cls: string, anchor: 'end' | 'middle'): string {
+  return `<text x="${x.toFixed(1)}" y="${y}" text-anchor="${anchor}" class="${cls} ck">{{T:${start}}}</text>`
 }
 
 const stamp = (template: string, now: number) => template.replace(/\{\{T:(\d+)\}\}/g, (_, t: string) => elapsed(runFor(Number(t), now)))
 
-// a bar's track is one plain picture; what upstream showed on hover in a frame over it (the pill's time, each
-// checkpoint's) is the hover card (hoverCard). A plan is immutable, so the drawing at one width is reused until the
-// plan changes, or until the head's slide to a new step has played: a picture the desktop shows again would slide it again
-type Track = { base: string; isGliding: boolean }
+// a bar is drawn twice: the track itself as a plain picture, and a see-through layer on top for the hover parts
+// (checkpoint times, the pill's clock). That layer needs an interactive frame, and the desktop rebuilds such frames
+// on every redraw of the band; empty until hovered, the rebuild is invisible. A plan is immutable, so both drawings
+// at one width are reused until the plan changes, or until the head's slide to a new step has played: a picture the
+// desktop shows again would slide it again
+type Track = { base: string; overlay: string; isGliding: boolean }
 const drawn = new WeakMap<Plan, { W: number; track: Track; until: number }>()
 
 function trackSvg(p: Plan, W: number, now: number): Track {
@@ -330,9 +312,13 @@ function drawTrack(p: Plan, W: number): Track {
   }
   const px = [...dots].map(([cls, d]) => `<path class="${cls}" d="${d}"/>`).join('')
 
+  const took = stepTimes(p)
+  const tipRules: string[] = []
   let marks = ''
+  let hits = ''
+  let tips = ''
   let k = 0
-  p.stages.forEach(s => {
+  p.stages.forEach((s, i) => {
     s.steps.forEach((_, j) => {
       if (k > 0) {
         const x = (k / w.total) * W
@@ -344,9 +330,20 @@ function drawTrack(p: Plan, W: number): Track {
         marks += isStage
           ? `<rect x="${(x - 1.5).toFixed(1)}" y="${(H - 10) / 2}" width="3" height="10" rx="1.5" fill="${fill}" opacity="${opacity}"/>`
           : `<circle cx="${x.toFixed(1)}" cy="${H / 2}" r="1.4" fill="${fill}" opacity="${opacity}"/>`
+        const before = p.stages[isStage ? i - 1 : i]
+        const ended = isStage ? before?.steps[before.steps.length - 1] : s.steps[j - 1]
+        const label = isStage ? (before?.name ?? '') : (ended?.title ?? '')
+        const ms = isStage ? took.stages[i - 1] : took.steps.get(ended as PlanStep)
+        const text = ms === undefined ? label : `${label} · ${elapsed(ms)}`
+        const tw = textWidth(text, 6.2) + 16
+        const tx = Math.max(0, Math.min(W - tw, x - tw / 2))
+        hits += `<rect class="h${k}" x="${(x - 5).toFixed(1)}" width="10" height="${H}" fill="#000" fill-opacity="0"/>`
+        tips += `<g class="tp p${k}"><rect x="${tx.toFixed(1)}" y="2" width="${tw.toFixed(1)}" height="${H - 4}" rx="${(H - 4) / 2}" fill="#1F1E1D" fill-opacity=".94"/><text x="${(tx + 8).toFixed(1)}" y="${H / 2 + 3.8}" class="tt">${esc(text)}</text></g>`
+        tipRules.push(`.h${k}:hover~.p${k}`)
       }
       k++
     })
+    void i
   })
 
   // knob: a pill with stage and count, or a round dot with the stage number when narrow
@@ -356,6 +353,7 @@ function drawTrack(p: Plan, W: number): Track {
   const single = p.stages.length === 1
   const number = single ? w.step : w.stage + 1
   let knob = ''
+  let timePill = ''
   let kw = H
   if (isNarrow) {
     const label = done ? '' : String(number)
@@ -372,13 +370,21 @@ function drawTrack(p: Plan, W: number): Track {
     let shown = name
     while (shown.length > 3 && 20 + iconW + textWidth(shown) + 6 + countW > maxW) shown = shown.slice(0, -1)
     if (shown !== name) shown = shown.trimEnd() + '…'
-    const textW = textWidth(shown)
+    // a running pill is wide enough for its clock too, so the hover swap does not change its size
+    const textW = done ? textWidth(shown) : Math.max(textWidth(shown), CLOCK_W)
     kw = Math.round(20 + iconW + textW + 6 + countW)
     const left = -(iconW + textW) / 2
     const mid = left + iconW + textW / 2
     knob = `<rect x="${-kw / 2}" y="0" width="${kw}" height="${H}" rx="${H / 2}" fill="${color}"/>`
     if (icon) knob += `<path d="${icon}" transform="translate(${left.toFixed(1)} 5) scale(.5)" fill="none" stroke="${INK}" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>`
     knob += `<text x="${mid.toFixed(1)}" y="${H / 2 + 4.2}" text-anchor="middle" class="kt">${esc(shown)}${count ? `<tspan class="kc" dx="6">${count}</tspan>` : ''}</text>`
+    // hovering the pill lays a copy of it over the stage name, carrying the time the plan has run so far
+    if (!done) {
+      const face = `<rect x="${-kw / 2}" y="0" width="${kw}" height="${H}" rx="${H / 2}" fill="${color}"/>${
+        icon ? `<path d="${icon}" transform="translate(${left.toFixed(1)} 5) scale(.5)" fill="none" stroke="${INK}" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>` : ''
+      }`
+      timePill = `<g class="kb"><rect x="${-kw / 2}" y="0" width="${kw}" height="${H}" fill="#000" fill-opacity="0"/><g class="kv">${face}${liveClock(mid, H / 2 + 4.2, p.startedAt, 'kc0 kt', 'middle')}</g></g>`
+    }
   }
   const clampX = (x: number) => Math.max(kw / 2, Math.min(W - kw / 2, x))
   const kx = clampX(fx)
@@ -395,6 +401,14 @@ function drawTrack(p: Plan, W: number): Track {
 .kc{font-weight:400;fill-opacity:.75}
 @media (prefers-reduced-motion:reduce){.t0,.t1,.t2,.t3{animation:none}}
 </style>`
+  const hoverStyle = `<style>
+.tp{opacity:0;transition:opacity .12s;pointer-events:none}${tipRules.length ? `${tipRules.join(',')}{opacity:1}` : ''}
+.tt{font:400 11px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#FAF9F5}
+.kt{font:500 12px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:${INK}}
+.kv{opacity:0;filter:blur(3px);transition:opacity .2s,filter .2s}.kb:hover .kv{opacity:1;filter:none}
+.kb,rect[class^="h"]{cursor:pointer}
+${CLOCK_CSS}
+</style>`
   const glideFill = glide ? `<animate attributeName="width" from="${from.toFixed(1)}" to="${fx.toFixed(1)}" dur=".45s" ${ease} fill="freeze"/>` : ''
   const glideKnob = glide ? `<animateTransform attributeName="transform" type="translate" from="${kFrom.toFixed(1)} 0" to="${kx.toFixed(1)} 0" dur=".45s" ${ease} fill="freeze"/>` : ''
 
@@ -405,8 +419,10 @@ function drawTrack(p: Plan, W: number): Track {
 <g clip-path="url(#pill)"><rect width="${W}" height="${H}" fill="#8C8A82" fill-opacity=".16"/>
 <g clip-path="url(#fill)"><rect width="${fx.toFixed(1)}" height="${H}" fill="url(#base)"/>${px}</g>${marks}</g>
 <g transform="translate(${kx.toFixed(1)} 0)">${glideKnob}${knob}</g></svg>`
+  // the hover layer: checkpoint areas under the pill's copy, so the pill wins where they meet; tips on top
+  const overlay = `${open}${SEE_THROUGH}${hoverStyle}${hits}<g transform="translate(${kx.toFixed(1)} 0)">${timePill}</g>${tips}</svg>`
 
-  return { base, isGliding: glide }
+  return { base, overlay, isGliding: glide }
 }
 
 const AGENT_COLOR: Record<AgentRun['state'], string> = {
@@ -548,7 +564,7 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
     if (name !== full) name = name.trimEnd() + '…'
     const time =
       a.endedAt === null
-        ? liveClock(W - 9, y + 11.5, a.startedAt, 'sc sn st')
+        ? liveClock(W - 9, y + 11.5, a.startedAt, 'sc sn st', 'end')
         : `<text x="${W - 9}" y="${y + 11.5}" text-anchor="end" class="sn st">${elapsed(runFor(a.startedAt, a.endedAt))}</text>`
     const tool = isNarrow
       ? ''
@@ -833,20 +849,15 @@ const isGliding = (p: Plan, t: number) => {
 }
 const isAnimated = (p: Plan, t: number) => (isTurnLive && p.state === 'running') || hasRunningAgents(p) || isGliding(p, t)
 
-// cc-mods: what the band last drawn on the desktop shows of the time moving on: a running strip's clock, which steps
-// each second, and the hover cards' minutes (null when the desktop draws no band). Just after each wall-clock second
-// the band is drawn again while a clock runs or a card's minute has turned
+// cc-mods: whether the band last drawn on the desktop shows a running clock (a running strip, a pill's hover time);
+// while it does, the band is drawn again just after each wall-clock second, so its clocks step with the time
 let hasLiveClock = false
-let drawnCards: string | null = null
-const cardHeads = (list: readonly Plan[], now: number) => list.map(p => hoverCard(p, now).head).join('\n')
 let isBeating = false
 function beatOnTheSecond($: EngineInterface, now: number) {
   isBeating = true
   $.clock.after(1000 - (now % 1000) + 25, async () => {
-    const t = await $.clock.now()
-    const isDue = hasLiveClock || (drawnCards !== null && cardHeads(await read($, plans), t) !== drawnCards)
-    if (isDue && (await read($, isOpen))) await update($, tick, n => n + 1)
-    beatOnTheSecond($, t)
+    if (hasLiveClock && (await read($, isOpen))) await update($, tick, n => n + 1)
+    beatOnTheSecond($, await $.clock.now())
   })
 }
 
@@ -1292,7 +1303,6 @@ export const register: Register = on => {
     if (list.length === 0 || e.props.hasSurvey || !(await read($, isOpen))) {
       band = null
       hasLiveClock = false
-      drawnCards = null
       return next(e)
     }
     if (e.surface === 'terminal') {
@@ -1305,7 +1315,6 @@ export const register: Register = on => {
       const trackW = Math.max(12, Math.min(512, cols - titleW - (hasClicks ? 15 : 13)))
       band = { requestId: e.requestId, W: trackW, list }
       hasLiveClock = false
-      drawnCards = null
       return (
         <Box flexDirection="column">
           {list.map(p => {
@@ -1358,7 +1367,7 @@ export const register: Register = on => {
     const isFoldable = (p: Plan) => Svg !== null && (visibleAgents(p, now, budget, false)?.hidden.length ?? 0) > 0
     const trackW = Math.max(120, Math.min(1400, total - titleWidth - 140 - (Svg !== null ? TOGGLE_W : 0)))
     const toggle = (id: string) => update($, expanded, ids => (ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]))
-    // what this draw stamps; a running strip clock in it keeps the band drawn again on each second
+    // what this draw stamps; a running clock in it keeps the band drawn again on each second
     let isLive = false
     const draw = (template: string) => {
       if (template.includes('{{T:')) isLive = true
@@ -1371,7 +1380,7 @@ export const register: Register = on => {
       const isExpanded = opened.includes(p.id)
       const v = visibleAgents(p, now, budget, isExpanded)
       const track = trackSvg(p, trackW, now)
-      const card = hoverCard(p, now)
+      const hover = draw(track.overlay)
       const strips = v && Svg
         ? stripsSvg(v, p.agents ?? [], trackW, now).map(r => (
             <Svg
@@ -1412,13 +1421,8 @@ export const register: Register = on => {
             <Box flexDirection="column" flexShrink={0}>
               <Box key={`track-${p.id}`}>
                 <Svg source={track.base} alt={alt} width={trackW} height={TRACK_H} />
-                <Box position="absolute" top={0} left={0} display="none" hover={{ display: 'flex' }} flexDirection="column">
-                  <Text bold>{card.head}</Text>
-                  {card.lines.map((line, j) => (
-                    <Box key={`card-${p.id}-${j}`}>
-                      <Text dimColor>{line}</Text>
-                    </Box>
-                  ))}
+                <Box position="absolute" top={0} left={0}>
+                  <Svg source={hover} alt={`${p.title}: hover for times`} width={trackW} height={TRACK_H} isInteractive />
                 </Box>
               </Box>
               {strips}
@@ -1436,7 +1440,6 @@ export const register: Register = on => {
       ]
     })
     hasLiveClock = isLive
-    drawnCards = cardHeads(list, now)
 
     return (
       <Box flexDirection="column" gap={1}>

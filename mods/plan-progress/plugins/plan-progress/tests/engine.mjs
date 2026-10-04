@@ -207,20 +207,9 @@ export async function boot(file, kept = new Map()) {
       const svg = found.find(p => p.alt.startsWith(title + ':'))
       // the bar's agent strips are separate drawings keyed after it
       const strips = found.filter(p => String(p.key ?? '').startsWith(`strip-${id}-`))
-      // cc-mods: the bar's hover card, the host's own reveal over its track (upstream drew a hover frame instead)
-      const nodes = (n, pred, acc = []) => {
-        if (Array.isArray(n)) n.forEach(c => nodes(c, pred, acc))
-        else if (n && typeof n === 'object') {
-          if (pred(n)) acc.push(n)
-          ;(n.children ?? []).forEach(c => nodes(c, pred, acc))
-        }
-        return acc
-      }
-      const trackBox = nodes(tree, n => n.type === 'Box' && n.props.key === `track-${id}`)[0]
-      const reveal = nodes(trackBox?.children ?? [], n => n.type === 'Box' && n.props.display === 'none' && n.props.hover?.display === 'flex')[0]
-      const card = reveal ? nodes(reveal.children, n => n.type === 'Text').map(t => t.children.flat().join('')) : []
-      const frames = found.filter(p => p.isInteractive).length
-      return svg ? { alt: svg.alt, source: svg.source + strips.map(p => p.source).join(''), track: svg.source, card, frames, strips: strips.map(p => p.source), height: svg.height } : null
+      // the see-through hover layer drawn over the track
+      const overlay = found.slice(found.indexOf(svg) + 1).find(p => p.isInteractive)
+      return svg ? { alt: svg.alt, source: svg.source + strips.map(p => p.source).join('') + (overlay?.source ?? ''), track: svg.source, overlay: overlay?.source ?? '', strips: strips.map(p => p.source), height: svg.height } : null
     },
   }
   await api.sessionStart()
