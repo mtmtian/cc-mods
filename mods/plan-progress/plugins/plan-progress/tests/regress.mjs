@@ -491,6 +491,21 @@ const C = {
     const ok = /ctx 1k +0s/.test(row) && row.includes('(Explore · haiku 4.5 · low)')
     return [`row "${row.replace(/[⠀-⣿]/g, '·').trim()}"`, ok]
   },
+  // cc-mods: the band is repainted each wall-clock second, which starts every endless CSS loop over; a loop that whole
+  // seconds divide is at its first frame then anyway, so the restart does not show
+  async cc_loops_divide_the_second(E) {
+    await create(E)
+    E.tick(400)
+    await E.call({ id: 't', next: true })
+    await E.spawn('ag1', 'Scan tests')
+    E.tick(1000)
+    const sources = (await E.svgs()).map(p => p.source).join('')
+    const loops = [...sources.matchAll(/animation(?:-duration)?:\s*(?:[a-z]+\s+)?([\d.]+)(m?s)[^;}]*/g)]
+      .filter(m => /infinite/.test(m[0]) || m[0].startsWith('animation-duration'))
+      .map(m => Math.round(Number(m[1]) * (m[2] === 's' ? 1000 : 1)))
+    const bad = loops.filter(ms => 1000 % ms !== 0)
+    return [`loops ${loops.join(', ') || 'none'} ms; not dividing a second: ${bad.join(', ') || 'none'}`, loops.length >= 2 && bad.length === 0]
+  },
   async bars_survive_a_restart(E) {
     const kept = new Map()
     const first = await boot('./register.mjs', kept)

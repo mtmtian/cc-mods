@@ -159,8 +159,38 @@ test('draws its label before the native chip and redraws every second', async ($
   expect(await w.footer($)).toEqual(['Cache 60:00', 'native'])
 
   const before = w.redraws()
-  await w.clock.advance(3000)
+  await w.clock.advance(3025)
   expect(w.redraws() - before).toBe(3)
+})
+
+// plan-progress redraws its band 25 ms past each wall-clock second; landing on
+// the same instant keeps its once-a-second loops from being restarted mid-way
+test('redraws just after each wall-clock second, wherever the session started', async ($, on) => {
+  const w = world(on)
+  await w.clock.advance(400)
+  await w.start($)
+  await w.step($, warm())
+
+  const before = w.redraws()
+  await w.clock.advance(624)
+  expect(w.redraws() - before).toBe(0)
+  await w.clock.advance(1)
+  expect(w.redraws() - before).toBe(1)
+  await w.clock.advance(1000)
+  expect(w.redraws() - before).toBe(2)
+})
+
+test('steps once a second from a response off the second, and never above the lifetime', async ($, on) => {
+  const w = world(on)
+  await w.clock.advance(400)
+  await w.start($)
+  await w.step($, warm())
+  expect(await w.shown($)).toBe('Cache 60:00')
+
+  await w.clock.advance(625)
+  expect(await w.shown($)).toBe('Cache 59:59')
+  await w.clock.advance(1000)
+  expect(await w.shown($)).toBe('Cache 59:58')
 })
 
 test('leaves the footer untouched before the first response', async ($, on) => {

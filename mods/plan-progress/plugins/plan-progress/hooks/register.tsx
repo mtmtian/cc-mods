@@ -251,6 +251,15 @@ function liveClock(x: number, y: number, start: number, cls: string, anchor: 'en
 
 const stamp = (template: string, now: number) => template.replace(/\{\{T:(\d+)\}\}/g, (_, t: string) => elapsed(runFor(Number(t), now)))
 
+// cc-mods: every repaint starts a picture's endless CSS over from its first frame. A running band is repainted each
+// wall-clock second (beatOnTheSecond, and cache-timer's footer on the same second), so a loop that whole seconds
+// divide is back at its first frame just then and goes on unbroken; the head's twinkle (it was 1.9 to 3.3 s, cut off
+// and jumped back each second) runs in four groups a quarter second apart, the agent dot pulses once a second.
+// A repaint on another beat (a tool's timer in the desktop) still restarts them
+const TWINKLE_CSS = `.t0,.t1,.t2,.t3{animation:tw 1s ease-in-out infinite}.t1{animation-delay:-.25s}.t2{animation-delay:-.5s}.t3{animation-delay:-.75s}
+@keyframes tw{0%,100%{opacity:1}50%{opacity:.45}}
+@media (prefers-reduced-motion:reduce){.t0,.t1,.t2,.t3{animation:none}}`
+
 // a bar is drawn twice: the track itself as a plain picture, and a see-through layer on top for the hover parts
 // (checkpoint times, the pill's clock). That layer needs an interactive frame, and the desktop rebuilds such frames
 // on every redraw of the band; empty until hovered, the rebuild is invisible. A plan is immutable, so both drawings
@@ -394,12 +403,9 @@ function drawTrack(p: Plan, W: number): Track {
 .b0{fill:${buckets[0]?.color};fill-opacity:${buckets[0]?.opacity}}.b1{fill:${buckets[1]?.color};fill-opacity:${buckets[1]?.opacity}}
 .b2{fill:${buckets[2]?.color};fill-opacity:${buckets[2]?.opacity}}.b3{fill:${buckets[3]?.color};fill-opacity:${buckets[3]?.opacity}}
 .b4{fill:${buckets[4]?.color};fill-opacity:${buckets[4]?.opacity}}
-.t0,.t1,.t2,.t3{animation:tw 2.2s ease-in-out infinite}
-.t1{animation-duration:2.8s;animation-delay:-.7s}.t2{animation-duration:1.9s;animation-delay:-1.3s}.t3{animation-duration:3.3s;animation-delay:-.4s}
-@keyframes tw{0%,100%{opacity:1}50%{opacity:.45}}
+${TWINKLE_CSS}
 .kt{font:500 12px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:${INK}}
 .kc{font-weight:400;fill-opacity:.75}
-@media (prefers-reduced-motion:reduce){.t0,.t1,.t2,.t3{animation:none}}
 </style>`
   const hoverStyle = `<style>
 .tp{opacity:0;transition:opacity .12s;pointer-events:none}${tipRules.length ? `${tipRules.join(',')}{opacity:1}` : ''}
@@ -625,13 +631,11 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
 const STRIP_STYLE = `<style>.sn{font:400 11.5px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#FAF9F5}.st{fill-opacity:.65}.sg{font-weight:500;font-variant-numeric:tabular-nums}.nm{font-variant-numeric:tabular-nums}
 .gi{stroke:#9C9A92}.sn.gl{fill:#9C9A92}.gi.gm{stroke:#8C8A82}.sn.gl.gm{fill:#8C8A82}${wordCss([255, 255, 255], 0.45)}
 @media (prefers-color-scheme:light){.sn{fill:#141413}.gi,.gi.gm{stroke:#73726C}.sn.gl,.sn.gl.gm{fill:#73726C}${wordCss([0, 0, 0], 0.35)}}
-.sd{animation:sp 1.1s ease-in-out infinite}@keyframes sp{50%{opacity:.3}}
+.sd{animation:sp 1s ease-in-out infinite}@keyframes sp{50%{opacity:.3}}
 .mi{animation:mi ${MORPH} ease-out both}@keyframes mi{from{opacity:0;filter:blur(3px)}}
 .mo{animation:mo ${MORPH} ease-in both}@keyframes mo{to{opacity:0;filter:blur(3px)}}
-.t0,.t1,.t2,.t3{animation:tw 2.2s ease-in-out infinite}.t1{animation-duration:2.8s;animation-delay:-.7s}.t2{animation-duration:1.9s;animation-delay:-1.3s}.t3{animation-duration:3.3s;animation-delay:-.4s}
-@keyframes tw{0%,100%{opacity:1}50%{opacity:.45}}
 ${CLOCK_CSS}
-@media (prefers-reduced-motion:reduce){.sd,.mi,.mo,.t0,.t1,.t2,.t3{animation:none}.mo{opacity:0}}</style>`
+@media (prefers-reduced-motion:reduce){.sd,.mi,.mo{animation:none}.mo{opacity:0}}</style>`
 
 function plural(n: number, word: string) {
   return `${n} ${word}${n === 1 ? '' : 's'}`
