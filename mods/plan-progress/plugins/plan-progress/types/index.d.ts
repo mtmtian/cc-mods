@@ -16,6 +16,10 @@ export type AgentRun = {
   // the model it runs on and its effort, as the engine resolved them
   model?: string
   effort?: string
+  // cc-mods: the agent definition it runs as (subagent_type: worker, Explore, a plugin's agent)
+  type?: string
+  // cc-mods: the input tokens its last request carried (uncached, cache read and cache written), as the status line counts them
+  ctx?: number
 }
 export type Plan = {
   id: string
