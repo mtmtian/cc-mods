@@ -459,14 +459,18 @@ const elapsed = (ms: number) => {
   return sec < 3600 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`
 }
 
+// a batch of agents that all finished folds its strips away a few seconds later; a failed one keeps them
+const isFolded = (p: Plan, now: number) => p.agentsDoneAt != null && now - p.agentsDoneAt > FOLD_MS && !(p.agents ?? []).some(a => a.state === 'error')
+// cc-mods: the Agents bar holds strips alone (syncAuto): no track, pill or percent, and it shows only while they do
+const hasTrack = (p: Plan) => p.id !== AGENTS
+const isShown = (p: Plan, now: number) => hasTrack(p) || !isFolded(p, now)
+
 // which strips show. Folded (the default) keeps a strip for each agent that needs the person (waiting) or failed,
 // and one summary row for the rest; a lone other agent keeps its own strip, as tall as the summary would be.
 // Opened out: all of a small batch; in a big one the unfinished first, the rest folded into one line
 function visibleAgents(p: Plan, now: number, max: number, isExpanded: boolean): { shown: AgentRun[]; hidden: AgentRun[] } | null {
   const list = p.agents ?? []
-  if (list.length === 0) return null
-  const hasError = list.some(a => a.state === 'error')
-  if (p.agentsDoneAt && now - p.agentsDoneAt > FOLD_MS && !hasError) return null
+  if (list.length === 0 || isFolded(p, now)) return null
   if (!isExpanded) {
     const urgent = new Set(list.filter(a => a.state === 'waiting' || a.state === 'error').slice(0, max - 1).map(a => a.id))
     const rest = list.filter(a => !urgent.has(a.id))
@@ -614,6 +618,10 @@ function plural(n: number, word: string) {
   return `${n} ${word}${n === 1 ? '' : 's'}`
 }
 
+// '  7%' to '100%' in the same room; a bar without a track keeps that room blank, so its strips stand in the column
+// of the other bars' tracks
+const percentText = (p: Plan, pct: number) => (hasTrack(p) ? `${String(pct).padStart(3, FIGURE_SPACE)}%` : FIGURE_SPACE.repeat(4))
+
 const DEFAULT = 0x01000000
 let isLight = false
 const termBg = () => (isLight ? [255, 255, 255] : [24, 24, 27])
@@ -757,8 +765,8 @@ function trackCells(p: Plan, W: number, t: number): string {
   } else {
     const agents = p.agents ?? []
     name = done ? 'Done' : single ? (p.stages[0]?.name ?? 'Tasks') : (p.stages[w.stage]?.name ?? '')
-    const baseCount = p.id === AGENTS ? `${w.pos}/${w.total}` : done ? `${w.total}/${w.total}` : single ? `${number}/${w.total}` : `${w.step}/${w.stageSize}`
-    count = baseCount + (agents.length > 0 && p.id !== AGENTS ? ` · ${agents.filter(a => a.state === 'done').length}/${agents.length}` : '')
+    const baseCount = done ? `${w.total}/${w.total}` : single ? `${number}/${w.total}` : `${w.step}/${w.stageSize}`
+    count = baseCount + (agents.length > 0 ? ` · ${agents.filter(a => a.state === 'done').length}/${agents.length}` : '')
   }
   const lead = icon && W >= 28 ? `${icon} ` : ''
   const maxName = Math.max(3, Math.floor(W * (W < 60 ? 0.75 : 0.55)) - cellsOf(lead) - cellsOf(count) - 5)
@@ -900,7 +908,7 @@ async function animate($: EngineInterface) {
         // the terminal has no ▾ to open folded strips, so it shows all it has room for
         const v = visibleAgents(p, now, stripBudget(b.list.length), true)
         const strips = v ? stripCells(v, b.W, now) : null
-        const calls = [$.ui.blit({ requestId: b.requestId, key: `track-${p.id}`, cells: trackCells(p, b.W, now) })]
+        const calls = !hasTrack(p) ? [] : [$.ui.blit({ requestId: b.requestId, key: `track-${p.id}`, cells: trackCells(p, b.W, now) })]
         if (strips) calls.push($.ui.blit({ requestId: b.requestId, key: `strips-${p.id}`, cells: strips.cells }))
         return calls.map(c => c.catch(() => undefined))
       }),
@@ -989,20 +997,33 @@ const toolUses = new Map<string, string>() // tool_use_id -> agentId, to find wh
 const waiting = new Set<string>()
 let foldUntil = 0 // keep ticking until finished strips have folded
 
-// the mod's own bar mirrors its agents as steps, finished first, so percent and count read done/total
+// cc-mods: the mod's own bar holds strips and nothing else: an agent reports no progress, and upstream's count of
+// finished agents as steps sat at 0% until the last one ended. Its state follows its agents
 function syncAuto(p: Plan, now: number): Plan {
   const agents = p.agents ?? []
   const isOver = agents.length > 0 && agents.every(a => a.state === 'done' || a.state === 'error')
   const agentsDoneAt = isOver ? (p.agentsDoneAt ?? now) : null
   if (p.id !== AGENTS) return { ...p, agentsDoneAt }
-  const rank = (a: AgentRun) => (a.state === 'done' ? 0 : a.state === 'error' ? 1 : 2)
-  const steps: PlanStep[] = [...agents]
-    .sort((a, b) => rank(a) - rank(b))
-    .map(a => ({ title: a.title, status: a.state === 'done' ? 'done' : a.state === 'error' ? 'error' : 'active', substeps: [] }))
   const state: PlanState = isOver
     ? agents.some(a => a.state === 'error') ? 'error' : 'done'
     : agents.some(a => a.state === 'waiting') ? 'needs_input' : 'running'
-  return { ...p, agentsDoneAt, stages: [{ name: 'Agents', steps }], state }
+  return { ...p, agentsDoneAt, state }
+}
+
+// cc-mods: agents the main thread started this turn, before it opened the bar for that work, move from the Agents
+// bar onto it; the Agents bar goes once it holds none
+function adoptAgents(list: readonly Plan[], id: string, ids: ReadonlySet<string>, now: number): Plan[] {
+  const moving = (list.find(p => p.id === AGENTS)?.agents ?? []).filter(a => ids.has(a.id))
+  if (moving.length === 0) return [...list]
+  return list.flatMap(p => {
+    if (p.id === AGENTS) {
+      const left = (p.agents ?? []).filter(a => !ids.has(a.id))
+      return left.length > 0 ? [syncAuto({ ...p, agents: left }, now)] : []
+    }
+    if (p.id !== id) return [p]
+    // as addRun does, a batch that has finished makes room
+    return [syncAuto({ ...p, agents: [...(p.agentsDoneAt ? [] : (p.agents ?? [])), ...moving], agentsDoneAt: null }, now)]
+  })
 }
 
 function addRun(p: Plan, run: AgentRun, parentId: string | undefined, now: number): Plan {
@@ -1110,6 +1131,8 @@ export const register: Register = on => {
   let isPlanTouched = false
   let hasRefused = false
   let isWaitingOnBackground = false
+  // agents started this turn onto the Agents bar, for the bar the turn opens next (adoptAgents)
+  const toAdopt = new Set<string>()
 
   on('turn.start', async ($, e, next) => {
     isTurnLive = true
@@ -1118,6 +1141,7 @@ export const register: Register = on => {
     isPlanTouched = false
     hasRefused = false
     isWaitingOnBackground = false
+    toAdopt.clear()
 
     return next(e)
   })
@@ -1242,7 +1266,8 @@ export const register: Register = on => {
     $.clock.every(1000, async () => {
       const now = await $.clock.now()
       // a finished bar goes away on its own after a while; a failed one stays until the person closes it
-      const isStale = (p: Plan) => p.state === 'done' && now - (p.endedAt ?? p.agentsDoneAt ?? now) > DONE_LINGER_MS
+      // cc-mods: a bar without a track goes when its strips fold
+      const isStale = (p: Plan) => p.state === 'done' && (hasTrack(p) ? now - (p.endedAt ?? p.agentsDoneAt ?? now) > DONE_LINGER_MS : !isShown(p, now))
       if ((await read($, plans)).some(isStale)) await update($, plans, all => all.filter(p => !isStale(p)))
       const list = await read($, plans)
       forgetGone(list)
@@ -1275,6 +1300,11 @@ export const register: Register = on => {
       Boolean(e.agentId),
     )
     if (typeof next === 'string') return { deny: next }
+    if (!e.agentId && toAdopt.size > 0 && isOpenPlan(next)) {
+      await update($, plans, list => adoptAgents(list, id, toAdopt, now))
+      for (const a of toAdopt) if (agentHome.get(a) === AGENTS) agentHome.set(a, id)
+      toAdopt.clear()
+    }
     isPlanTouched = true
     sinceUpdate = 0
     const w = where(next)
@@ -1333,7 +1363,7 @@ export const register: Register = on => {
       hasLiveClock = false
       return (
         <Box flexDirection="column">
-          {list.map(p => {
+          {list.filter(p => isShown(p, now)).map(p => {
             const v = visibleAgents(p, now, stripBudget(list.length), true)
             const strips = v ? stripCells(v, trackW, now) : null
             const w = where(p)
@@ -1345,8 +1375,12 @@ export const register: Register = on => {
                   <Box width={titleW} flexShrink={0}>
                     <Text wrap="truncate">{p.title}</Text>
                   </Box>
-                  <Raster key={`track-${p.id}`} columns={trackW} rows={1} cells={trackCells(p, trackW, now)} />
-                  <Text dimColor>{`${String(pct).padStart(3, FIGURE_SPACE)}%`}</Text>
+                  {hasTrack(p) ? (
+                    <Raster key={`track-${p.id}`} columns={trackW} rows={1} cells={trackCells(p, trackW, now)} />
+                  ) : (
+                    <Box width={trackW} flexShrink={0} />
+                  )}
+                  <Text dimColor>{percentText(p, pct)}</Text>
                   {hasClicks ? <Button key={`close-${p.id}`} plain dimColor label="✕" onPress={() => dropPlan($, p.id)} /> : null}
                 </Box>
                 {p.note && p.state !== 'running' ? (
@@ -1393,13 +1427,12 @@ export const register: Register = on => {
     // a hairline between task bars, so each bar and its agent strips read as one group
     const divider = `<svg xmlns="http://www.w3.org/2000/svg" width="${total}" height="1"><rect width="${total}" height="1" fill="#8C8A82" fill-opacity=".22"/></svg>`
 
-    const bars = list.flatMap((p, i) => {
+    const bars = list.filter(p => isShown(p, now)).flatMap((p, i) => {
       const isExpanded = opened.includes(p.id)
       const v = visibleAgents(p, now, budget, isExpanded)
-      const track = trackSvg(p, trackW, now)
-      const hover = draw(track.overlay)
+      const track = hasTrack(p) ? trackSvg(p, trackW, now) : null
       const rows = v && Svg ? stripsSvg(v, p.agents ?? [], trackW, now) : []
-      if (track.isGliding || rows.some(r => r.isMorphing)) isPlaying = true
+      if (track?.isGliding || rows.some(r => r.isMorphing)) isPlaying = true
       const strips = v && Svg
         ? rows.map(r => (
             <Svg
@@ -1438,14 +1471,18 @@ export const register: Register = on => {
           <Box flexGrow={1} />
           {Svg ? (
             <Box flexDirection="column" flexShrink={0}>
-              <Box key={`track-${p.id}`}>
-                <Svg source={track.base} alt={alt} width={trackW} height={TRACK_H} />
-                <Box position="absolute" top={0} left={0}>
-                  <Svg source={hover} alt={`${p.title}: hover for times`} width={trackW} height={TRACK_H} isInteractive />
+              {track ? (
+                <Box key={`track-${p.id}`}>
+                  <Svg source={track.base} alt={alt} width={trackW} height={TRACK_H} />
+                  <Box position="absolute" top={0} left={0}>
+                    <Svg source={draw(track.overlay)} alt={`${p.title}: hover for times`} width={trackW} height={TRACK_H} isInteractive />
+                  </Box>
                 </Box>
-              </Box>
+              ) : null}
               {strips}
             </Box>
+          ) : !hasTrack(p) ? (
+            <Text dimColor>{tally(p.agents ?? [])}</Text>
           ) : (
             <Text>
               <Text color={color}>{bar.replace(/─/g, '')}</Text>
@@ -1453,7 +1490,7 @@ export const register: Register = on => {
               <Text color={color}>{` ${stageName} ${w.step}/${w.stageSize}`}</Text>
             </Text>
           )}
-          <Text dimColor>{`${String(pct).padStart(3, FIGURE_SPACE)}%`}</Text>
+          <Text dimColor>{percentText(p, pct)}</Text>
           <Button key={`close-${p.id}`} plain dimColor label="✕" onPress={() => dropPlan($, p.id)} />
         </Box>,
       ]
@@ -1494,6 +1531,7 @@ export const register: Register = on => {
     })
     // known only once its strip is stored, so the cleanup in the clock never sees a home without the agent
     agentHome.set(id, home)
+    if (home === AGENTS) toAdopt.add(id)
     if (isNew) await update($, isOpen, () => true)
 
     return started
