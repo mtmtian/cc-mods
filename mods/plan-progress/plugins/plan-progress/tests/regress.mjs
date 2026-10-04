@@ -275,7 +275,7 @@ const C = {
     await create(E)
     await E.spawn('ag1', 'Scan tests')
     // the still parts: the track picture and the strips, apart from the time their clocks read, which every
-    // draw sets from now (the hover layer is rebuilt every redraw by design)
+    // draw sets from now
     const still = v => (v.track + v.strips.join('')).replace(/ ck">[^<]*</g, ' ck"><')
     const a = still(await E.view('t'))
     E.tick(7000)
@@ -325,12 +325,41 @@ const C = {
       isGlide(at) && !isGlide(later) && isGlide(done) && !isGlide(doneLater),
     ]
   },
-  async running_pill_has_live_clock(E) {
+  // cc-mods: a bar's time and its steps' times show on hover in the host's own card, which holds while the pointer
+  // does; upstream's hover frame over the track was rebuilt by every redraw, so with the clocks' redraw each second
+  // its tips flashed and went
+  async cc_hover_is_a_host_card_not_a_frame(E) {
+    await create(E)
+    const v = await E.view('t')
+    return [`frames ${v.frames}, card ${JSON.stringify(v.card)}`, v.frames === 0 && v.card.length > 0]
+  },
+  async cc_running_card_has_live_time(E) {
     await create(E)
     E.tick(83_000)
     await E.call({ id: 't', next: true })
-    const src = (await E.view('t')).overlay
-    return [`clock ${src.includes('class="kc0 ')}, reads ${clock(src)}`, src.includes('class="kc0 ') && clock(src) === '1m 23s' && !src.includes('{{T:')]
+    const { card } = await E.view('t')
+    return [JSON.stringify(card), card[0] === 'One · step 2 of 2 · 1m' && card[1] === 'A · 1m 23s']
+  },
+  // the card lists each finished step and how long it took, the latest last, at most six with the rest counted
+  async cc_hover_card_lists_finished_steps(E) {
+    await create(E)
+    E.tick(10_000)
+    await E.call({ id: 't', done: ['A'] })
+    E.tick(25_000)
+    await E.call({ id: 't', next: true })
+    const three = (await E.view('t')).card
+    const titles = ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9']
+    await create(E, 'm', [S('List', ...titles)], 'Many')
+    for (const _ of titles.slice(0, 8)) {
+      E.tick(1000)
+      await E.call({ id: 'm', next: true })
+    }
+    const many = (await E.view('m')).card
+    return [
+      `${JSON.stringify(three)}; ${JSON.stringify(many)}`,
+      JSON.stringify(three) === JSON.stringify(['Two · step 1 of 1 · <1m', 'A · 10s', 'B · 25s']) &&
+        many.length === 8 && many[1] === '2 earlier steps' && many[2] === 's3 · 1s' && many[7] === 's8 · 1s',
+    ]
   },
   async done_pill_static_time(E) {
     await create(E)
@@ -354,25 +383,40 @@ const C = {
     const v = await E.view('t') // that redraw: the answer every later repaint shows again
     const runsByItself = s => s.includes('--d:') || /animation:[^;}]*var\(--d\)/.test(s)
     return [
-      `redrawn on the second ${isRedrawn}; strip reads ${clock(v.strips[0])}, pill ${clock(v.overlay)}; a clock running by itself ${runsByItself(v.strips[0] + v.overlay)}`,
-      isRedrawn && clock(v.strips[0]) === '1m 23s' && clock(v.overlay) === '1m 23s' && !runsByItself(v.strips[0] + v.overlay),
+      `redrawn on the second ${isRedrawn}; strip reads ${clock(v.strips[0])}, card ${v.card[0]}; a clock running by itself ${runsByItself(v.strips[0])}`,
+      isRedrawn && clock(v.strips[0]) === '1m 23s' && v.card[0]?.endsWith(' · 1m') && !runsByItself(v.strips[0]),
     ]
   },
-  // cc-mods: the beat draws the band again only while a running clock shows: a finished bar's time stands still
-  async cc_no_beat_without_a_running_clock(E) {
+  // cc-mods: the beat draws the band again each second only while a strip's clock runs; a running bar's hover card
+  // counts minutes, so it brings a redraw once its minute turns, and a finished bar none. A host hover card redrawn
+  // as the pointer leaves can stay behind on the desktop, so the band is drawn no more often than it must be
+  async cc_beat_only_when_the_time_shown_moves(E) {
+    const beat = async () => {
+      const before = tickOf(E)
+      await E.fireTimers()
+      return tickOf(E) !== before
+    }
     await create(E)
     E.tick(5000)
     await E.call({ id: 't', state: 'done' })
     await E.view('t')
-    const before = tickOf(E)
     E.tick(1000)
-    await E.fireTimers()
-    const isIdle = tickOf(E) === before
-    await create(E, 'u', three(), 'Other') // a running bar: its pill carries the time on hover
+    const done = await beat()
+    await create(E, 'u', three(), 'Other')
     await E.view('u')
-    await E.fireTimers()
-    const isLive = tickOf(E) !== before
-    return [`done bar alone redrawn ${!isIdle}, with a running bar ${isLive}`, isIdle && isLive]
+    E.tick(1000)
+    const sameMinute = await beat()
+    E.tick(60_000)
+    const minuteTurned = await beat()
+    await E.view('u')
+    await E.spawn('ag1', 'Scan tests')
+    await E.view('u')
+    E.tick(1000)
+    const agentClock = await beat()
+    return [
+      `done bar ${done}, running bar within its minute ${sameMinute}, when its minute turns ${minuteTurned}, with a running agent ${agentClock}`,
+      !done && !sameMinute && minuteTurned && agentClock,
+    ]
   },
   async strips_clock_live_then_static(E) {
     await create(E)
@@ -453,7 +497,7 @@ const C = {
   },
   // cc-mods: the ▾ sits in the title row. Moved to the end of the last agent row, inside the track's column, the
   // desktop's native button came out far wider than its room: the column widened and pushed the bar's title, percent
-  // and ✕ out of the band. The track's column holds drawings alone, each as wide as the track
+  // and ✕ out of the band. The track's column holds no button, and its drawings are as wide as the track
   async cc_fold_button_stays_out_of_the_track_column(E) {
     await create(E)
     for (const id of ['ag1', 'ag2', 'ag3']) await E.spawn(id, `Agent ${id}`)
@@ -467,7 +511,7 @@ const C = {
       const strips = nodes(column?.children ?? [], n => n.type === 'Svg' && String(n.props.key).startsWith('strip-t-')).map(n => n.props.width)
       return {
         byTitle: row.some(n => n?.type === 'Button' && n.props.key === 'agents-t'),
-        onlyDrawings: inColumn.every(t => t === 'Box' || t === 'Svg'),
+        noButton: !inColumn.includes('Button'),
         sameWidth: strips.length > 0 && strips.every(w => w === track),
       }
     }
@@ -476,7 +520,7 @@ const C = {
     const open = await check()
     return [
       `folded ${JSON.stringify(folded)}; opened ${JSON.stringify(open)}`,
-      [folded, open].every(c => c.byTitle && c.onlyDrawings && c.sameWidth),
+      [folded, open].every(c => c.byTitle && c.noButton && c.sameWidth),
     ]
   },
   // cc-mods: the agents button appearing with a second agent leaves the track width alone
@@ -505,12 +549,6 @@ const C = {
     await E.everyTick()
     const later = E.plans().map(p => p.id).join(',')
     return [`59s: ${early}; 61s: ${late}; 3m: ${later}`, early === 't,bad' && late === 'bad' && later === 'bad']
-  },
-  async pill_covers_checkpoints(E) {
-    await create(E)
-    const src = (await E.view('t')).overlay
-    const hit = src.indexOf('class="h'), pill = src.indexOf('<g transform="translate('), tip = src.indexOf('class="tp')
-    return [`hit ${hit} < pill ${pill} < tip ${tip}`, hit > 0 && hit < pill && pill < tip]
   },
   // cc-mods: a sound only when the person is needed; agents finishing or failing stay quiet
   async cc_agents_finish_and_fail_quietly(E) {
