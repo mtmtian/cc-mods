@@ -674,6 +674,63 @@ const C = {
     const first = glyphs(row.props.cells).indexOf('One')
     return [`pill text at column ${first}`, first >= 0 && first <= 2]
   },
+  // cc-mods: the main thread often starts an agent and only then opens the bar for that work; the agent sat on the
+  // Agents bar beside the task bar for good. One started this turn moves onto the bar opened after it; one from an
+  // earlier turn stays where it is
+  async cc_turn_agents_join_the_bar_opened_after_them(E) {
+    await E.turnStart()
+    await E.spawn('ag0', 'Earlier work')
+    await E.turnStart()
+    await E.spawn('ag1', 'Build page')
+    await create(E)
+    await E.agentTool('ag1', 'Bash') // its strip is found on the bar it moved to
+    const on = id => (E.bar(id)?.agents ?? []).map(a => `${a.id}:${a.tool}`).join(',')
+    return [`t [${on('t')}], agents bar [${on('agents:auto')}]`, on('t') === 'ag1:Bash' && on('agents:auto') === 'ag0:Starting']
+  },
+  // a bar an agent opens for its own work, or one opened already finished, leaves the main thread's agents be
+  async cc_only_an_open_main_bar_adopts(E) {
+    await E.turnStart()
+    await E.spawn('ag1', 'Build page')
+    await E.call({ id: 'sub', title: 'Sub', stages: three(), agentId: 'ag1' })
+    await E.call({ id: 'old', title: 'Old', stages: [S('One', st('A', 'done'))] })
+    const on = id => (E.bar(id)?.agents ?? []).map(a => a.id).join(',')
+    return [`sub [${on('sub')}], old [${on('old')}], agents bar [${on('agents:auto')}]`, on('sub') === '' && on('old') === '' && on('agents:auto') === 'ag1']
+  },
+  async cc_agents_bar_goes_once_emptied(E) {
+    await E.turnStart()
+    await E.spawn('ag1', 'Build page')
+    await create(E)
+    return [`bars ${E.plans().map(p => p.id).join(', ')}`, E.plans().length === 1 && E.bar('t')?.agents?.length === 1]
+  },
+  // cc-mods: the Agents bar has no progress to show: an agent reports none, and a count of finished agents sat at 0%
+  // until the last one ended. The bar draws its strips alone, with no track, pill or percent, on either surface
+  async cc_agents_bar_draws_strips_alone(E) {
+    await E.spawn('ag1', 'Build page')
+    const tree = await E.tree()
+    const svgs = nodes(tree, n => n.type === 'Svg').map(n => n.props)
+    const track = svgs.some(p => p.alt.startsWith('Agents:'))
+    const strips = svgs.filter(p => String(p.key ?? '').startsWith('strip-agents:auto-')).length
+    const percent = nodes(tree, n => n.type === 'Text' && n.children.join('').includes('%')).length
+    const term = await E.terminal(120)
+    const termTrack = term.some(n => n.type === 'Raster' && n.props.key === 'track-agents:auto')
+    const termStrips = term.some(n => n.type === 'Raster' && n.props.key === 'strips-agents:auto')
+    const termPercent = term.some(n => n.type === 'Text' && n.children.join('').includes('%'))
+    return [
+      `desktop: track ${track}, ${strips} strip, percent ${percent}; terminal: track ${termTrack}, strips ${termStrips}, percent ${termPercent}`,
+      !track && strips === 1 && percent === 0 && !termTrack && termStrips && !termPercent,
+    ]
+  },
+  // with nothing but folded strips to show, the Agents bar leaves with them instead of lingering a minute
+  async cc_agents_bar_leaves_with_its_strips(E) {
+    await E.spawn('ag1', 'Build page')
+    await E.turnComplete('ag1')
+    E.tick(1000)
+    await E.everyTick()
+    const during = !!E.bar('agents:auto')
+    E.tick(5000)
+    await E.everyTick()
+    return [`a second after the agent ${during}, six seconds after ${!!E.bar('agents:auto')}`, during && !E.bar('agents:auto')]
+  },
   async strip_tool_sits_right_and_name_keeps_its_model(E) {
     await create(E)
     await E.spawn('ag1', 'Review Python backend architecture')
