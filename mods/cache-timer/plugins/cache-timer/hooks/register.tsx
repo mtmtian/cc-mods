@@ -48,10 +48,9 @@ async function shown($: EngineInterface, fixedTtl: Ttl | null): Promise<string |
 }
 
 // Redraws just after each wall-clock second. Every redraw makes the desktop
-// show the other plugins' pictures afresh, restarting their animations;
-// plan-progress redraws its band on the same second, so the two land
-// together and its once-a-second loops go on unbroken. One chain per module,
-// however often the session starts.
+// show the other plugins' pictures afresh; plan-progress draws its band on
+// the same second, so the screen changes once a second, not twice. One chain
+// per module, however often the session starts.
 let isBeating = false
 function beat($: EngineInterface, now: number): void {
   isBeating = true

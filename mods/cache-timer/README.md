@@ -11,7 +11,7 @@ Idea from [@savvyntsev](https://x.com/savvyntsev/status/2105982856455458905), wh
   - after a model switch, the engine names the lifetime (`cache_ttl` on `PostModelSwitch`) and the mod takes it;
   - a request on the same model sent 5 to 60 minutes after the previous one tells them apart: a cache read means 1h, a miss that writes the cache again means 5m.
 - A resumed session starts from the resumed transcript's last response.
-- The label is drawn again 25 ms after each wall-clock second and counts whole wall-clock seconds, so it steps once a second however late its timer fires. That is the instant plan-progress draws its band again: each redraw makes the desktop show the pictures on screen afresh, restarting their animations, and landing together keeps plan-progress's once-a-second loops unbroken.
+- The label is drawn again 25 ms after each wall-clock second and counts whole wall-clock seconds, so it steps once a second however late its timer fires. That is the instant plan-progress draws its band again, so the footer and the band change together, once a second.
 
 Set `ttl` to `1h` or `5m` in the plugin's config row to always count down from that.
 
