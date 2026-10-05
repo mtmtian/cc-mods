@@ -274,9 +274,9 @@ const C = {
   async same_bar_same_source_while_time_passes(E) {
     await create(E)
     await E.spawn('ag1', 'Scan tests')
-    // the still parts: the track picture and the strips, apart from the time their clocks read, which every
-    // draw sets from now (the hover layer is rebuilt every redraw by design)
-    const still = v => (v.track + v.strips.join('')).replace(/ ck">[^<]*</g, ' ck"><')
+    // the still parts: the track picture and the strips, apart from what every draw stamps from now: the time their
+    // clocks read and (cc-mods) the agent dot's level (the hover layer is rebuilt every redraw by design)
+    const still = v => (v.track + v.strips.join('')).replace(/ ck">[^<]*</g, ' ck"><').replace(/class="sd" opacity="[\d.]+"/g, 'class="sd"')
     const a = still(await E.view('t'))
     E.tick(7000)
     const b = still(await E.view('t'))
@@ -491,20 +491,63 @@ const C = {
     const ok = /ctx 1k +0s/.test(row) && row.includes('(Explore · haiku 4.5 · low)')
     return [`row "${row.replace(/[⠀-⣿]/g, '·').trim()}"`, ok]
   },
-  // cc-mods: the band is repainted each wall-clock second, which starts every endless CSS loop over; a loop that whole
-  // seconds divide is at its first frame then anyway, so the restart does not show
-  async cc_loops_divide_the_second(E) {
+  // cc-mods: no picture holds an endless CSS loop. Every repaint started one over from its first frame, and a draw on an
+  // event (an agent done, a step) lands off the second, so a loop jumped there and at the next second; the twinkle and
+  // the agent dot are stamped on the second instead
+  async cc_no_endless_loops(E) {
     await create(E)
-    E.tick(400)
     await E.call({ id: 't', next: true })
     await E.spawn('ag1', 'Scan tests')
-    E.tick(1000)
+    await E.spawn('ag2', 'Read docs') // folded into the summary row, whose dot is stamped too
     const sources = (await E.svgs()).map(p => p.source).join('')
-    const loops = [...sources.matchAll(/animation(?:-duration)?:\s*(?:[a-z]+\s+)?([\d.]+)(m?s)[^;}]*/g)]
-      .filter(m => /infinite/.test(m[0]) || m[0].startsWith('animation-duration'))
-      .map(m => Math.round(Number(m[1]) * (m[2] === 's' ? 1000 : 1)))
-    const bad = loops.filter(ms => 1000 % ms !== 0)
-    return [`loops ${loops.join(', ') || 'none'} ms; not dividing a second: ${bad.join(', ') || 'none'}`, loops.length >= 2 && bad.length === 0]
+    const loops = (sources.match(/infinite|repeatCount/g) ?? []).length
+    const stamped = /\.t\d\{opacity:[\d.]+\}/.test(sources) && /class="sd" opacity="[\d.]+"/.test(sources) && !sources.includes('{{')
+    return [`endless loops ${loops}, twinkle and dot stamped ${stamped}`, loops === 0 && stamped]
+  },
+  // cc-mods: two draws within a second are the same picture, so a repaint shows nothing new; on the next second the
+  // twinkle groups take their next levels (the same set of levels, so the head's brightness holds) and the dot flips
+  async cc_twinkle_and_dot_step_on_the_second(E) {
+    await create(E)
+    await E.call({ id: 't', next: true })
+    await E.spawn('ag1', 'Scan tests')
+    const t0 = await E.$.clock.now()
+    E.tick(1000 - (t0 % 1000) + 100)
+    const a = (await E.svgs()).map(p => p.source).join('')
+    E.tick(700)
+    const b = (await E.svgs()).map(p => p.source).join('')
+    E.tick(400)
+    const c = (await E.svgs()).map(p => p.source).join('')
+    // the stamped rules, not the reduced-motion list that ends in .t3{opacity:1}
+    const levels = s => [...s.matchAll(/(?<!,)\.t\d\{opacity:([\d.]+)\}/g)].map(m => m[1])
+    const dot = s => s.match(/class="sd" opacity="([\d.]+)"/)?.[1]
+    const turned = levels(a).join() !== levels(c).join() && [...levels(a)].sort().join() === [...levels(c)].sort().join()
+    return [
+      `same second same picture ${a === b}; next second twinkle ${levels(a).join('/')} → ${levels(c).join('/')}, dot ${dot(a)} → ${dot(c)}`,
+      a === b && levels(a).length === 4 && turned && dot(a) !== undefined && dot(a) !== dot(c),
+    ]
+  },
+  // cc-mods: a stamped dot keeps the band drawn on the second by itself: the Agents bar's folded row has no clock
+  async cc_beat_for_a_stamped_dot_without_a_clock(E) {
+    await E.spawn('ag1', 'Scan') // no task bar: the mod's own Agents bar
+    await E.spawn('ag2', 'Read')
+    const src = (await E.svgs()).map(p => p.source).join('')
+    const hasClock = src.includes(' ck"')
+    const before = tickOf(E)
+    E.tick(1000)
+    await E.fireTimers()
+    return [`clock ${hasClock}, dot ${src.includes('class="sd"')}, redrawn on the second ${tickOf(E) !== before}`, !hasClock && src.includes('class="sd"') && tickOf(E) !== before]
+  },
+  // cc-mods: braces in an agent's description are its text, not a stamp: a finished strip keeps no beat going
+  async cc_braces_in_a_title_are_no_stamp(E) {
+    await create(E)
+    await E.call({ id: 't', state: 'done' })
+    await E.spawn('ag1', 'Render {{name}} template')
+    await E.turnComplete('ag1', 'error') // a failed strip stays until the bar is closed
+    const src = (await E.svgs()).map(p => p.source).join('')
+    const before = tickOf(E)
+    E.tick(1000)
+    await E.fireTimers()
+    return [`title kept ${src.includes('{{name}}')}, redrawn on the second ${tickOf(E) !== before}`, src.includes('{{name}}') && tickOf(E) === before]
   },
   async bars_survive_a_restart(E) {
     const kept = new Map()

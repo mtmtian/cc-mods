@@ -249,16 +249,27 @@ function liveClock(x: number, y: number, start: number, cls: string, anchor: 'en
   return `<text x="${x.toFixed(1)}" y="${y}" text-anchor="${anchor}" class="${cls} ck">{{T:${start}}}</text>`
 }
 
-const stamp = (template: string, now: number) => template.replace(/\{\{T:(\d+)\}\}/g, (_, t: string) => elapsed(runFor(Number(t), now)))
+// cc-mods: the head's twinkle and a running agent's dot step on the wall-clock second like the clocks, written in at
+// every draw ({{TW}}, {{P}}) and still in between. Every repaint starts a picture's CSS over from its first frame, and
+// a draw on an event (an agent done, a step) lands off the second, so an endless CSS loop jumped there and again at the
+// next second; a still picture shown again is the same picture. The four twinkle groups take turns through the levels,
+// so the head's brightness holds; the dot is lit one second and dimmed the next
+const TWINKLE_LEVELS = ['1', '.75', '.45', '.75']
+const PULSE_LEVELS = ['1', '.4']
+const twinkleCss = (sec: number) => [0, 1, 2, 3].map(k => `.t${k}{opacity:${TWINKLE_LEVELS[(sec + k) % 4]}}`).join('')
+// reduced motion holds the twinkle at full, after the stamped rules so it wins (the dot's rule is in STRIP_STYLE)
+const STILL_CSS = '@media (prefers-reduced-motion:reduce){.t0,.t1,.t2,.t3{opacity:1}}'
 
-// cc-mods: every repaint starts a picture's endless CSS over from its first frame. A running band is repainted each
-// wall-clock second (beatOnTheSecond, and cache-timer's footer on the same second), so a loop that whole seconds
-// divide is back at its first frame just then and goes on unbroken; the head's twinkle (it was 1.9 to 3.3 s, cut off
-// and jumped back each second) runs in four groups a quarter second apart, the agent dot pulses once a second.
-// A repaint on another beat (a tool's timer in the desktop) still restarts them
-const TWINKLE_CSS = `.t0,.t1,.t2,.t3{animation:tw 1s ease-in-out infinite}.t1{animation-delay:-.25s}.t2{animation-delay:-.5s}.t3{animation-delay:-.75s}
-@keyframes tw{0%,100%{opacity:1}50%{opacity:.45}}
-@media (prefers-reduced-motion:reduce){.t0,.t1,.t2,.t3{animation:none}}`
+const stamp = (template: string, now: number) => {
+  const sec = Math.floor(now / 1000)
+  return template
+    .replace(/\{\{T:(\d+)\}\}/g, (_, t: string) => elapsed(runFor(Number(t), now)))
+    .replaceAll('{{TW}}', twinkleCss(sec))
+    .replaceAll('{{P}}', PULSE_LEVELS[sec % 2] ?? '1')
+}
+// a drawing with anything stamped changes on the second, so the band is drawn again on each one while it shows; the
+// exact marks, since a title or an agent's description may hold braces of its own
+const isStamped = (template: string) => /\{\{(?:T:\d+|TW|P)\}\}/.test(template)
 
 // a bar is drawn twice: the track itself as a plain picture, and a see-through layer on top for the hover parts
 // (checkpoint times, the pill's clock). That layer needs an interactive frame, and the desktop rebuilds such frames
@@ -308,6 +319,7 @@ function drawTrack(p: Plan, W: number): Track {
     return { color: rgb(mix(grey, light, m)), opacity: (0.35 + 0.65 * dense).toFixed(2) }
   })
   const dots = new Map<string, string>()
+  let hasTwinkle = false
   for (let col = 0; col * 3 < fx; col++) {
     const x = col * 3
     const u = Math.min(1, (x + 1.5) / fx)
@@ -316,10 +328,13 @@ function drawTrack(p: Plan, W: number): Track {
     for (let r = 0; r < 7; r++) {
       if (hash(col, r, 1) > dense + 0.1) continue
       const isLive = p.state === 'running' && fx - x <= HEAD_TWINKLE
+      if (isLive) hasTwinkle = true
       addDot(dots, isLive ? `b${bucket} t${Math.floor(hash(col, r, 2) * 4)}` : `b${bucket}`, x, 1 + r * 3)
     }
   }
   const px = [...dots].map(([cls, d]) => `<path class="${cls}" d="${d}"/>`).join('')
+  // cc-mods: a head with twinkling dots takes this second's levels at each draw (stamp)
+  const twinkle = hasTwinkle ? `{{TW}}${STILL_CSS}` : ''
 
   const took = stepTimes(p)
   const tipRules: string[] = []
@@ -403,7 +418,7 @@ function drawTrack(p: Plan, W: number): Track {
 .b0{fill:${buckets[0]?.color};fill-opacity:${buckets[0]?.opacity}}.b1{fill:${buckets[1]?.color};fill-opacity:${buckets[1]?.opacity}}
 .b2{fill:${buckets[2]?.color};fill-opacity:${buckets[2]?.opacity}}.b3{fill:${buckets[3]?.color};fill-opacity:${buckets[3]?.opacity}}
 .b4{fill:${buckets[4]?.color};fill-opacity:${buckets[4]?.opacity}}
-${TWINKLE_CSS}
+${twinkle}
 .kt{font:500 12px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:${INK}}
 .kc{font-weight:400;fill-opacity:.75}
 </style>`
@@ -603,7 +618,7 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
     const html =
       gutter(y, String(all.indexOf(a) + 1)) +
       `<rect x="${GUTTER}" y="${y}" width="${SW}" height="${STRIP_H}" rx="${STRIP_H / 2}" fill="${c}" fill-opacity=".15">${flow('fill')}</rect>${px}` +
-      `<circle cx="${GUTTER + 10 + indent}" cy="${y + STRIP_H / 2}" r="3" fill="${c}"${a.state === 'running' ? ' class="sd"' : ''}>${flow('fill')}</circle>` +
+      `<circle cx="${GUTTER + 10 + indent}" cy="${y + STRIP_H / 2}" r="3" fill="${c}"${a.state === 'running' ? ' class="sd" opacity="{{P}}"' : ''}>${flow('fill')}</circle>` +
       `<text x="${nameX}" y="${y + 11.5}" class="sn">${nameMarkup(name)}</text>` +
       tool
     drawnRows.set(a, { key: rowKey, html })
@@ -621,7 +636,7 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
       html:
         gutter(y, v.shown.length === 0 ? String(v.hidden.length) : `+${v.hidden.length}`, true) +
         `<rect x="${GUTTER}" y="${y}" width="${SW}" height="${STRIP_H}" rx="${STRIP_H / 2}" fill="#8C8A82" fill-opacity=".14"/>` +
-        (isLive ? `<circle cx="${GUTTER + 10}" cy="${y + STRIP_H / 2}" r="3" fill="${AGENT_COLOR.running}" class="sd"/>` : '') +
+        (isLive ? `<circle cx="${GUTTER + 10}" cy="${y + STRIP_H / 2}" r="3" fill="${AGENT_COLOR.running}" class="sd" opacity="{{P}}"/>` : '') +
         `<text x="${GUTTER + (isLive ? 19 : 10)}" y="${y + 11.5}" class="sn st">${label} · ${tally(v.hidden)}</text>`,
     })
   }
@@ -631,11 +646,10 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, all: AgentRun[]
 const STRIP_STYLE = `<style>.sn{font:400 11.5px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#FAF9F5}.st{fill-opacity:.65}.sg{font-weight:500;font-variant-numeric:tabular-nums}.nm{font-variant-numeric:tabular-nums}
 .gi{stroke:#9C9A92}.sn.gl{fill:#9C9A92}.gi.gm{stroke:#8C8A82}.sn.gl.gm{fill:#8C8A82}${wordCss([255, 255, 255], 0.45)}
 @media (prefers-color-scheme:light){.sn{fill:#141413}.gi,.gi.gm{stroke:#73726C}.sn.gl,.sn.gl.gm{fill:#73726C}${wordCss([0, 0, 0], 0.35)}}
-.sd{animation:sp 1s ease-in-out infinite}@keyframes sp{50%{opacity:.3}}
 .mi{animation:mi ${MORPH} ease-out both}@keyframes mi{from{opacity:0;filter:blur(3px)}}
 .mo{animation:mo ${MORPH} ease-in both}@keyframes mo{to{opacity:0;filter:blur(3px)}}
 ${CLOCK_CSS}
-@media (prefers-reduced-motion:reduce){.sd,.mi,.mo{animation:none}.mo{opacity:0}}</style>`
+@media (prefers-reduced-motion:reduce){.mi,.mo{animation:none}.mo{opacity:0}.sd{opacity:1}}</style>`
 
 function plural(n: number, word: string) {
   return `${n} ${word}${n === 1 ? '' : 's'}`
@@ -886,14 +900,14 @@ const isGliding = (p: Plan, t: number) => {
 }
 const isAnimated = (p: Plan, t: number) => (isTurnLive && p.state === 'running') || hasRunningAgents(p) || isGliding(p, t)
 
-// cc-mods: whether the band last drawn on the desktop shows a running clock (a running strip, a pill's hover time);
-// while it does, the band is drawn again just after each wall-clock second, so its clocks step with the time
-let hasLiveClock = false
+// cc-mods: whether the band last drawn on the desktop holds anything stamped on the second (a running clock, the
+// head's twinkle, a running agent's dot); while it does, the band is drawn again just after each wall-clock second
+let hasStamp = false
 let isBeating = false
 function beatOnTheSecond($: EngineInterface, now: number) {
   isBeating = true
   $.clock.after(1000 - (now % 1000) + 25, async () => {
-    if (hasLiveClock && (await read($, isOpen))) await update($, tick, n => n + 1)
+    if (hasStamp && (await read($, isOpen))) await update($, tick, n => n + 1)
     beatOnTheSecond($, await $.clock.now())
   })
 }
@@ -1376,7 +1390,7 @@ export const register: Register = on => {
     const list = await read($, plans)
     if (list.length === 0 || e.props.hasSurvey || !(await read($, isOpen))) {
       band = null
-      hasLiveClock = false
+      hasStamp = false
       return next(e)
     }
     if (e.surface === 'terminal') {
@@ -1388,7 +1402,7 @@ export const register: Register = on => {
       const titleW = Math.max(4, Math.min(Math.round(cols * 0.28), Math.max(...list.map(p => cellsOf(p.title)))))
       const trackW = Math.max(12, Math.min(512, cols - titleW - (hasClicks ? 15 : 13)))
       band = { requestId: e.requestId, W: trackW, list }
-      hasLiveClock = false
+      hasStamp = false
       return (
         <Box flexDirection="column">
           {list.filter(p => isShown(p, now)).map(p => {
@@ -1445,11 +1459,11 @@ export const register: Register = on => {
     const isFoldable = (p: Plan) => Svg !== null && (visibleAgents(p, now, budget, false)?.hidden.length ?? 0) > 0
     const trackW = Math.max(120, Math.min(1400, total - titleWidth - 140 - (Svg !== null ? TOGGLE_W : 0)))
     const toggle = (id: string) => update($, expanded, ids => (ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]))
-    // what this draw stamps; a running clock in it keeps the band drawn again on each second
+    // what this draw stamps; anything stamped keeps the band drawn again on each second
     let isLive = false
     let isPlaying = false
     const draw = (template: string) => {
-      if (template.includes('{{T:')) isLive = true
+      if (isStamped(template)) isLive = true
       return stamp(template, now)
     }
     // a hairline between task bars, so each bar and its agent strips read as one group
@@ -1501,7 +1515,7 @@ export const register: Register = on => {
             <Box flexDirection="column" flexShrink={0}>
               {track ? (
                 <Box key={`track-${p.id}`}>
-                  <Svg source={track.base} alt={alt} width={trackW} height={TRACK_H} />
+                  <Svg source={draw(track.base)} alt={alt} width={trackW} height={TRACK_H} />
                   <Box position="absolute" top={0} left={0}>
                     <Svg source={draw(track.overlay)} alt={`${p.title}: hover for times`} width={trackW} height={TRACK_H} isInteractive />
                   </Box>
@@ -1523,7 +1537,7 @@ export const register: Register = on => {
         </Box>,
       ]
     })
-    hasLiveClock = isLive
+    hasStamp = isLive
     if (isPlaying) drawAgainOncePlayed($)
 
     return (
