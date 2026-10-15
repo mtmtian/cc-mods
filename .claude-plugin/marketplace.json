@@ -20,12 +20,6 @@
       "description": "Live plan progress bars above the Claude Code prompt, with subagent strips and soft sounds. Fork of zycck/claude-mods: runs on the desktop app's engine, no plan-mode import, no demo-reel file writes.",
       "homepage": "https://github.com/zycck/claude-mods",
       "repository": "https://github.com/mtmtian/cc-mods"
-    },
-    {
-      "name": "cache-timer",
-      "source": "./mods/cache-timer/plugins/cache-timer",
-      "description": "Counts down, in the prompt footer beside the model, the time left before the main thread's prompt cache lapses, so you know when the next message will pay to re-write it. Written here; idea from @savvyntsev.",
-      "repository": "https://github.com/mtmtian/cc-mods"
     }
   ]
 }
