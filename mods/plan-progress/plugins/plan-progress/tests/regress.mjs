@@ -5646,6 +5646,30 @@ const C = {
       delete globalThis.OPTIONS
     }
   },
+  async cc_adopted_agent_that_finished_wakes_again(E) {
+    // an agent that finished before the main loop opened its bar moves onto it as finished; resumed, its strip wakes,
+    // and a permission dialog for its call turns it amber
+    await E.turnStart()
+    await E.spawn('ag1', 'Build page')
+    await E.turnComplete('ag1')
+    await create(E)
+    await E.agentTool('ag1', 'Read')
+    const held = await E.hold('ag1')
+    const a = E.bar('t')?.agents?.find(x => x.id === 'ag1')
+    await held.release()
+    return [`ag1 on t: ${a?.state}, ${a?.tool}`, a?.state === 'waiting']
+  },
+  async cc_person_message_leaves_an_agents_question(E) {
+    // the person's message answers the main loop's question, never one a subagent put on its own bar
+    await E.spawn('ag1', 'Scan')
+    await E.call({ id: 'sub', title: 'Sub', stages: three(), agentId: 'ag1' })
+    await E.call({ id: 'sub', state: 'needs_input', note: 'which folder?', agentId: 'ag1' })
+    await create(E)
+    await E.call({ id: 't', state: 'needs_input', note: 'pick one' })
+    await E.submit()
+    const sub = E.bar('sub')
+    return [`sub ${sub?.state} (${sub?.note}), main ${E.bar('t')?.state}`, sub?.state === 'needs_input' && sub?.note === 'which folder?' && E.bar('t')?.state === 'running']
+  },
   async cc_agents_bar_goes_once_emptied(E) {
     await E.turnStart()
     await E.spawn('ag1', 'Build page')

@@ -3049,10 +3049,12 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     if (!PERSON_ORIGINS.has(e.origin.kind)) return next(e)
     const list = await read($, plans)
-    // the Agents bar waits on an agent's permission dialog, which a message does not answer
-    if (list.some(p => p.state === 'needs_input' && p.id !== AGENTS)) {
+    // the Agents bar waits on an agent's permission dialog, which a message does not answer; cc-mods: nor does it answer a
+    // question a subagent put on a bar of its own, which goes to Claude
+    const isAnswered = (p: Plan) => p.state === 'needs_input' && p.id !== AGENTS && !p.byAgent
+    if (list.some(isAnswered)) {
       const now = await $.clock.now()
-      await update($, plans, all => all.map(p => (p.state === 'needs_input' && p.id !== AGENTS ? answered(p, now) : p)))
+      await update($, plans, all => all.map(p => (isAnswered(p) ? answered(p, now) : p)))
       askedIds.clear()
     }
     const open = (await read($, plans)).filter(p => p.state !== 'done' && p.id !== AGENTS)
@@ -3303,8 +3305,9 @@ export const register: Register = (on, options) => {
     // cc-mods: agents the main thread started this turn before it opened this bar move onto it
     if (!e.agentId && toAdopt.size > 0 && isOpening && isOpenPlan(next) && !next.byAgent) {
       await update($, plans, list => adoptAgents(list, id, toAdopt, now))
-      // homed on the bar where their strips landed, never on one an agent gone from the Agents bar meanwhile never reached
-      for (const a of (await read($, plans)).find(p => p.id === id)?.agents ?? []) if (toAdopt.has(a.id)) agentHome.set(a.id, id)
+      // homed on the bar where their strips landed, never on one an agent gone from the Agents bar meanwhile never reached;
+      // only one still at work: a finished one left the map at its end, and a resume finds its strip there and wakes it
+      for (const a of (await read($, plans)).find(p => p.id === id)?.agents ?? []) if (toAdopt.has(a.id) && agentHome.has(a.id)) agentHome.set(a.id, id)
       toAdopt.clear()
     }
     if (!e.agentId || next.byAgent === e.agentId) handedOver.delete(id)
