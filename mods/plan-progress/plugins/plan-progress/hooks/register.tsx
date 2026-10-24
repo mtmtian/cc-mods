@@ -28,7 +28,25 @@ const INK = '#FFFFFF'
 // background and foreground, and its mode says light or dark. Null anywhere else, where the defaults above stay
 type Omarchy = { accent: string; background: number[]; foreground: number[]; isLight: boolean }
 let omarchy: Omarchy | null = null
-const stateColor = (s: PlanState) => (s === 'running' && omarchy ? omarchy.accent : STATE_COLOR[s])
+
+// cc-mods: the desktopColors option (on in the manifest) draws in the Claude desktop app's own tokens, so the band reads
+// as part of it: running in its brand clay (--accent-brand), waiting on the person in its accent blue (--accent-100),
+// error and done in its danger and success. A pill is a shade deeper where white must read at 4.5:1 on it, and a strip's
+// tool word is lifted toward the scheme's far end until it reads at 4.5:1 on its tint. Off, or for a host that passes
+// no options, upstream's palette
+type Palette = { state: Record<PlanState, string>; pill: Record<PlanState, string>; word: Record<'dark' | 'light', Record<AgentRun['state'], string>> }
+const DESKTOP_PALETTE: Palette = {
+  state: { running: '#D97757', needs_input: '#2C84DB', error: '#B53333', done: '#2F7613' },
+  pill: { running: '#B55C3E', needs_input: '#1B67B2', error: '#B53333', done: '#2F7613' },
+  // each 4.6:1 or more on the desktop strip's tint and on the terminal's, as the engine paints it in 4-bit colour
+  word: {
+    dark: { running: '#DB7F61', waiting: '#5FA2E4', error: '#CD7676', done: '#6B9E57' },
+    light: { running: '#9E5740', waiting: '#246BB1', error: '#B13232', done: '#2C6E12' },
+  },
+}
+let palette: Palette | null = null
+const stateColor = (s: PlanState) => (s === 'running' && omarchy ? omarchy.accent : (palette?.state ?? STATE_COLOR)[s])
+const pillColor = (s: PlanState) => (s === 'running' && omarchy ? omarchy.accent : (palette?.pill ?? STATE_COLOR)[s])
 
 function parseOmarchy(toml: string): Omarchy | null {
   const color = (key: string) => new RegExp(`^\\s*${key}\\s*=\\s*["'](#[0-9a-fA-F]{6})["']`, 'm').exec(toml)?.[1]?.toLowerCase()
@@ -839,7 +857,7 @@ function drawTrack(p: Plan, W: number, now = 0): Track {
 
   // knob: a pill with stage and count, or a round dot with the stage number when narrow
   const isNarrow = W < NARROW
-  const color = stateColor(p.state)
+  const color = pillColor(p.state)
   const icon = ICON_PATH[p.state]
   const single = p.stages.length === 1
   const number = single ? w.step : w.stage + 1
@@ -957,13 +975,9 @@ ${STILL_CSS}@media (prefers-reduced-motion:reduce){${STILL_REDUCED}}</style>`
   return { base, overlay, clock }
 }
 
-const AGENT_COLOR: Record<AgentRun['state'], string> = {
-  running: STATE_COLOR.running,
-  waiting: STATE_COLOR.needs_input,
-  done: STATE_COLOR.done,
-  error: STATE_COLOR.error,
-}
-const agentColor = (s: AgentRun['state']) => (s === 'running' ? stateColor('running') : AGENT_COLOR[s])
+// an agent's state in the colour of the bar state it matches; cc-mods: through stateColor, so the palette follows it
+const AGENT_STATE: Record<AgentRun['state'], PlanState> = { running: 'running', waiting: 'needs_input', done: 'done', error: 'error' }
+const agentColor = (s: AgentRun['state']) => stateColor(AGENT_STATE[s])
 
 // strip text that reads at WCAG AA (4.5:1) on its tint, in a dark and a light scheme (issue #13). The desktop draws
 // a strip as a picture over the app's background, which no event tells the plugin: the picture carries both sets,
@@ -974,6 +988,8 @@ const SCHEMES: Record<'dark' | 'light', Scheme> = {
   dark: { page: '#1F1E1D', ink: '#F0EEFC', dim: '#A7A5AE', gutter: '#A8A69E', more: '#9A9993', word: { running: '#9C85D8', waiting: '#C0883B', done: '#4FA569', error: '#D67278' } },
   light: { page: '#FFFFFF', ink: '#222226', dim: '#5B5B5E', gutter: '#5F5E59', more: '#6F6D66', word: { running: '#6A4DB2', waiting: '#905300', done: '#157632', error: '#B13038' } },
 }
+// cc-mods: a scheme with the palette's tool words
+const schemeOf = (name: 'dark' | 'light'): Scheme => (palette ? { ...SCHEMES[name], word: palette.word[name] } : SCHEMES[name])
 
 // the desktop drops an Svg whose alt is empty, so every drawing says what it shows
 function stripAlt(p: Plan, key: string, v: Shown | null): string {
@@ -1401,14 +1417,15 @@ const STRIP_TWINKLE = `.t0,.t1,.t2,.t3{animation:tw 2.2s ease-in-out infinite}.t
 @keyframes tw{0%,100%{opacity:1}50%{opacity:.45}}
 `
 const stripStyle = (twinkle: string) => `<style>.sn{font:400 11.5px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif}.sg,.nm{font-variant-numeric:tabular-nums}.sg{font-weight:500}
-${schemeCss(SCHEMES.dark)}@media (prefers-color-scheme:light){${schemeCss(SCHEMES.light)}}.gu .sn,.gm .sn{fill:currentColor}
+${schemeCss(schemeOf('dark'))}@media (prefers-color-scheme:light){${schemeCss(schemeOf('light'))}}.gu .sn,.gm .sn{fill:currentColor}
 .sd{animation:sp 1.1s ease-in-out infinite}@keyframes sp{50%{opacity:.3}}
 .mi{animation:mi ${MORPH} ease-out both}@keyframes mi{from{opacity:0;filter:blur(3px)}}
 .mo{animation:mo ${MORPH} ease-in both}@keyframes mo{to{opacity:0;filter:blur(3px)}}
 ${twinkle}${CLOCK_CSS}
 ${STILL_CSS}@media (prefers-reduced-motion:reduce){.sd,.mi,.mo,.t0,.t1,.t2,.t3{animation:none}.mo{opacity:0}${STILL_REDUCED}}</style>`
-const STRIP_STYLE = stripStyle(STRIP_TWINKLE)
-const STRIP_STILL = stripStyle('')
+// drawn again when register settles the palette (cc-mods)
+let STRIP_STYLE = stripStyle(STRIP_TWINKLE)
+let STRIP_STILL = stripStyle('')
 
 function plural(n: number, word: string) {
   return `${n} ${word}${n === 1 ? '' : 's'}`
@@ -1418,7 +1435,7 @@ const DEFAULT = 0x01000000
 let isLight = false
 const termBg = () => omarchy?.background ?? (isLight ? [255, 255, 255] : [24, 24, 27])
 const termFg = () => omarchy?.foreground ?? (isLight ? [34, 34, 38] : [240, 238, 252])
-const scheme = () => SCHEMES[isLight ? 'light' : 'dark']
+const scheme = () => schemeOf(isLight ? 'light' : 'dark')
 const pack = (c: number[]) => ((c[0] ?? 0) << 16) | ((c[1] ?? 0) << 8) | (c[2] ?? 0)
 // a Raster cell takes one printable BMP character exactly one column wide, as the engine measures it
 // (Bun.stringWidth, ambiguous narrow); any other character refuses the whole tree and every bar vanishes.
@@ -1607,7 +1624,7 @@ function trackCells(p: Plan, W: number, t: number): string {
     k += s.steps.length
   })
 
-  const base = hex(stateColor(p.state))
+  const base = hex(pillColor(p.state))
   const color = base
   const single = p.stages.length === 1
   const number = single ? Math.min(w.total, w.pos + 1) : w.stage + 1
@@ -2977,8 +2994,11 @@ export const register: Register = (on, options) => {
   const seconds = Number(options?.doneBarSeconds ?? 30)
   doneStaysMs = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 30_000
   isTwinkling = options?.twinkle !== false
-  // cc-mods: the manifest's default turns it on; a host that passes no options gets upstream's folding
+  // cc-mods: the manifest's defaults turn these on; a host that passes no options gets upstream's folding and palette
   isFoldByDefault = options?.foldAgents === true
+  palette = options?.desktopColors === true ? DESKTOP_PALETTE : null
+  STRIP_STYLE = stripStyle(STRIP_TWINKLE)
+  STRIP_STILL = stripStyle('')
 
   // per-turn bookkeeping; module variables are fine here, a reload just starts a fresh count
   let workCalls = 0

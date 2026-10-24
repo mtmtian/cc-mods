@@ -1,6 +1,6 @@
 {
   "name": "plan-progress",
-  "version": "1.0.0-cc.2",
+  "version": "1.0.0-cc.3",
   "description": "Live plan progress bars above the Claude Code prompt: stages, steps, a pixel fill and soft sounds for decision, error and done",
   "author": {
     "name": "Kirill Serditov",
@@ -25,6 +25,12 @@
       "type": "boolean",
       "title": "Fold agent strips by default",
       "description": "A bar's agents share one summary row, an agent waiting on you or failed keeping its own strip, until the bar's chevron or /progress-agents opens them. Off, every strip shows until folded",
+      "default": true
+    },
+    "desktopColors": {
+      "type": "boolean",
+      "title": "Claude desktop colours",
+      "description": "Draw the bars in the Claude desktop app's own colours (running in its clay, waiting in its blue). Off, upstream's violet palette",
       "default": true
     }
   },

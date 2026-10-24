@@ -5652,6 +5652,28 @@ const C = {
     await create(E)
     return [`bars ${E.plans().map(p => p.id).join(', ')}`, E.plans().length === 1 && E.bar('t')?.agents?.length === 1]
   },
+  async cc_desktop_colors_read_at_aa(E) {
+    // with desktopColors on (the manifest's default) a running bar's glyph takes the desktop's clay and its pill a shade
+    // deeper, where white reads at 4.5:1; upstream's two contrast cases pass on this palette in both schemes and the
+    // terminal, and a host that passes no options keeps upstream's violet
+    const plain = walkAll(await (await create(E), E.band())).find(n => n.type === 'Text' && (n.children ?? []).join('') === '●')?.props.color
+    globalThis.OPTIONS = { desktopColors: true }
+    try {
+      const F = await boot(file)
+      await create(F)
+      const glyph = walkAll(await F.band()).find(n => n.type === 'Text' && (n.children ?? []).join('') === '●')?.props.color
+      const pill = (await F.view('t')).track.match(/rx="11" fill="(#[0-9A-Fa-f]{6})"/)?.[1] ?? ''
+      const ink = pill ? contrast(toRgb(pill), [255, 255, 255]) : 0
+      const [desk, isDeskOk] = await C.desktop_strip_text_reads_in_light_and_dark(F)
+      const [term, isTermOk] = await C.terminal_strip_text_reads_in_light_and_dark()
+      return [
+        `upstream glyph ${plain}; glyph ${glyph}, pill ${pill} (white ${ink.toFixed(2)}); desktop strips: ${desk}; terminal: ${term}`,
+        plain === '#7858CA' && glyph === '#D97757' && pill === '#B55C3E' && ink >= 4.5 && isDeskOk && isTermOk,
+      ]
+    } finally {
+      delete globalThis.OPTIONS
+    }
+  },
   async dollar_goes_only_to_top_level_functions(E) {
     // the engine scans a module before it loads it and refuses one that hands a hook's $ to anything but a function
     // declared at the top of the file, or keeps $ in a variable: a dev mod's reload fails and the old code stays on,

@@ -4,7 +4,7 @@
 
 ## plan-progress
 
-> cc-mods fork: this copy differs from upstream (agent strips name their role and context, fold into a summary row by default and join the bar opened after them, a permission dialog left waiting sounds, finished bars stay 60 s with auto-close, no update check). See the [cc-mods README](../../README.md#mods).
+> cc-mods fork: this copy differs from upstream (the desktop app's own colours, agent strips name their role and context, fold into a summary row by default and join the bar opened after them, a permission dialog left waiting sounds, finished bars stay 60 s with auto-close, no update check). See the [cc-mods README](../../README.md#mods).
 
 Live progress bars above the Claude Code prompt. Claude splits a task into stages and steps, and the bar fills as it works. The subagents for each task are listed under its bar.
 
