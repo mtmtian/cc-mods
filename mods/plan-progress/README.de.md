@@ -1,4 +1,4 @@
-> cc-mods fork: this copy differs from upstream (no plan-mode import, no footer button, sounds only when you are needed, agent strips that name their role and context). See the [cc-mods README](../../README.md#mods).
+> cc-mods fork: this copy differs from upstream (agent strips name their role and context, fold into a summary row by default and join the bar opened after them, a permission dialog left waiting sounds, finished bars stay 60 s with auto-close, no update check). See the [cc-mods README](../../README.md#mods).
 
 # Mods für Claude Code
 
@@ -14,16 +14,23 @@ Live-Fortschrittsbalken über dem Eingabefeld von Claude Code. Claude teilt eine
 
 - Eine Zeile pro Aufgabe: Status, Titel, Balken, Prozent, Schließen-Schaltfläche
 - Das Label auf dem Balken zeigt die aktuelle Phase und den Schritt; beim Überfahren die bisherige Dauer
-- Phasen sind Kapseln, Schritte Punkte; beim Überfahren erscheint, wann sie erreicht wurden
-- Ein fertiger Balken wird grün und zeigt die Gesamtdauer
+- Phasen sind Kapseln, Schritte Punkte; beim Überfahren eines erreichten erscheint, wie lange er gedauert hat, bei einem kommenden, was dort beginnt
+- Ein fertiger Balken wird grün, zeigt die Gesamtdauer und bleibt, bis er geschlossen wird; mit eingeschaltetem `/plan-progress-autoclose` verschwindet er nach `doneBarSeconds` (standardmäßig 30 s, in `/config`)
+- Die Punkte der Füllung und der Subagent-Zeilen funkeln; mit `twinkle` aus in `/config` stehen sie still
 - Vier Zustände: läuft, wartet auf Antwort, Fehler, fertig
 - Jeder Subagent hat eine Zeile unter seiner Aufgabe: Name, Modell und Effort, aktuelles Tool, Dauer
 - Der Plan kann sich unterwegs ändern; erledigte Schritte bleiben über ihren Titel erhalten
 - Balken werden pro Sitzung gespeichert und beim Fortsetzen wiederhergestellt
 - Kurze Töne bei einer Frage, einem Fehler und beim Abschluss
+- Die Fußzeile zeigt, wie schnell das Hauptgespräch schreibt, `⚡ N tok/s`; Subagenten zählen nicht mit
+- Das ⚙ daneben (in der Desktop-App und im Terminal im Vollbild) öffnet ein Einstellungsfenster: Effekte, automatisches Schließen und seine Sekunden, Töne, die Anzeige selbst, die Version des Mods und die Update-Suche; `/plan-progress-settings` öffnet es überall. Das Fenster spricht die Sprache aus `/config`, sonst die der App oder des Systems
+- Updates: Ein Klick auf die Version im Einstellungsfenster sucht nach einer neuen Version, „Aktualisieren“ installiert sie und lädt den Mod an Ort und Stelle neu (greift das Neuladen nicht, bittet er um einen Neustart). Alle 6 Stunden sieht der Mod auch selbst nach und markiert das ⚙ mit 🔹 (im Terminal ●), wenn eine neue Version erschienen ist. Eine Prüfung ist eine einzige Anfrage an die GitHub-API (`api.github.com/repos/zycck/claude-mods/releases`), ohne Konto- oder Sitzungsdaten; abschalten lässt sie sich mit „Nach Updates suchen“ im Fenster oder mit `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`. Eine aus einem Ordner installierte Kopie wird nicht geprüft
 - Läuft in der Desktop-App und im Terminal
+- Im Terminal folgt der Balken mit dem Theme `auto` dem hellen oder dunklen GNOME-Desktop und übernimmt die Farben des aktiven Omarchy-Themes
 
 ### Installation
+
+Erfordert Claude Code 2.1.295 oder neuer (`claude --version`; aktualisieren mit `claude update`). In älteren Versionen funktioniert ein Teil des Mods nicht: Das Einstellungsfenster bleibt leer, und vor 2.1.286 lädt das Hooks-Modul gar nicht, es erscheinen keine Balken und beim Start steht `plan-progress: hooks module did not load`.
 
 ```
 /plugin marketplace add zycck/claude-mods
@@ -41,8 +48,9 @@ claude plugin update plan-progress@zycck-mods
 
 - `/progress` blendet die Balken ein oder aus
 - `/progress-clear` entfernt alle Balken
-
-Die Schaltfläche **Progress** in der Fußzeile entspricht `/progress`.
+- `/progress-agents` klappt die Agentenstreifen unter den Balken ein oder zeigt sie wieder (die Pfeil-Schaltfläche neben dem ✕ eines Balkens tut das für diesen Balken)
+- `/plan-progress-autoclose` schaltet das automatische Schließen fertiger Balken ein (standardmäßig aus) oder wieder aus; die Wahl bleibt über Sitzungen erhalten
+- `/plan-progress-settings` öffnet das Einstellungsfenster wie das ⚙ in der Fußzeile (im Terminal erscheint das ⚙ nur im Vollbild)
 
 ### Funktionsweise
 

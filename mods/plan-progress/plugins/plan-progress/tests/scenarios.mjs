@@ -1,9 +1,10 @@
 // each audit claim replayed through the real hooks; holds = the behaviour the audit describes happened
 import fs from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { boot, S, st } from './engine.mjs'
 
 const file = process.argv[2] ?? './register.mjs'
-const skill = fs.readFileSync(process.argv[3] ?? '../skills/plan-progress/SKILL.md', 'utf8')
+const skill = fs.readFileSync(process.argv[3] ?? new URL('../skills/plan-progress/SKILL.md', import.meta.url), 'utf8')
 const three = () => [S('One', st('A', 'active'), 'B'), S('Two', 'C')]
 const create = (E, id = 't', stages = three(), title = 'Task') => E.call({ id, title, stages })
 const res = r => r.deny ?? r.result
@@ -57,6 +58,27 @@ const T = {
     const s = E.steps('t')
     return { observed: `${s}; ${res(r)}`, holds: s === 'A:pending B:pending' }
   },
+  async T08(E) {
+    const plan = '# Fix login\n\n## Analyse\n- Read code\n- Find bug\n## Fix\n- Patch\n- Test'
+    await E.exitPlan({ result: { plan } })
+    await E.call({ id: 'fix-login', next: true })
+    await E.call({ id: 'fix-login', next: true })
+    const before = E.steps('fix-login')
+    await E.exitPlan({ result: { plan } })
+    const after = E.steps('fix-login')
+    return { observed: `${before} → ${after}`, holds: after === 'Read code:active Find bug:pending Patch:pending Test:pending' }
+  },
+  async T09(E) {
+    await E.exitPlan({ result: { plan: '# Fix login\n## A\n- One\n- Two\n## B\n- Three' } })
+    await E.exitPlan({ result: { plan: '# Fix login flow\n## A\n- One\n- Two\n## B\n- Three' } })
+    const ids = E.plans().map(p => p.id)
+    return { observed: ids.join(', '), holds: ids.length === 2 }
+  },
+  async T10(E) {
+    await E.exitPlan({ result: { plan: '# Ship\n- [x] Read code\n- [x] Find bug\n- [ ] Patch' } })
+    const s = E.steps('ship')
+    return { observed: s, holds: !s.includes(':done') }
+  },
   async T11(E) {
     await create(E)
     await E.call({ id: 't', active: 'C' })
@@ -100,8 +122,6 @@ const T = {
     await E.call({ id: 't', next: true })
     await E.agentTool('ag1', 'Read')
     await E.spawn('ag2', 'Second agent')
-    // cc-mods: two running agents fold into one summary row by default; open them out to see each strip
-    await E.press('agents-t')
     const src = (await E.view('t')).source
     return { observed: `ag1 back ${src.includes('Scan tests')}, ag2 shown ${src.includes('Second agent')}`, holds: !src.includes('Scan tests') }
   },
@@ -186,6 +206,16 @@ const T = {
     await E.call({ id: 't', title: 'Task', stages: [S('One', st('A', 'error'), st('B', 'active'))] })
     return { observed: E.bar('t').state, holds: E.bar('t').state === 'running' }
   },
+  async T30(E) {
+    await E.exitPlan({ deny: 'no' })
+    await E.exitPlan({ isError: true, result: { plan: '# X\n- a\n- b' } })
+    return { observed: `${E.plans().length} bars`, holds: E.plans().length === 0 }
+  },
+  async T31(E) {
+    await E.exitPlan({ result: { plan: null } })
+    await E.exitPlan({ result: {} })
+    return { observed: `${E.plans().length} bars`, holds: E.plans().length === 0 }
+  },
   async T32(E) {
     await E.call({ id: 't', title: 'Task', stages: [S('One', 'A', st('B', 'active'), 'C')] })
     await E.call({ id: 't', next: true })
@@ -198,9 +228,13 @@ const T = {
   },
 
   // ---- not in the audit ----
+  async N1_exitplan_id_unknown_to_model(E) {
+    const r = await E.exitPlan({ result: { plan: '# Fix login\n## A\n- One\n## B\n- Two' }, text: 'approved' })
+    return { observed: `bar "${E.plans()[0]?.id}" made; model got context: ${JSON.stringify(r.context ?? null)}`, holds: !r.context }
+  },
   async N2_orphan_bar_blocks_stop(E) {
     await E.turnStart()
-    await create(E, 'fix-login', [S('A', st('One', 'active')), S('B', 'Two')], 'Fix login')
+    await E.exitPlan({ result: { plan: '# Fix login\n## A\n- One\n## B\n- Two' } })
     await create(E, 'login', [S('A', st('One', 'active')), S('B', 'Two')], 'Login')
     await E.work('Edit')
     const r = await E.stop('All set.')
@@ -235,4 +269,5 @@ for (const [id, fn] of Object.entries(T)) {
   }
 }
 for (const r of out) console.log(`${r.holds ? 'HOLDS ' : 'NO    '} ${r.id.padEnd(32)} ${r.observed}`)
-fs.writeFileSync(file.replace(/\.mjs$/, '') + '.results.json', JSON.stringify(out, null, 2))
+// next to the build that was loaded, resolved as boot resolves it, so a file:/// URL works and any cwd does
+fs.writeFileSync(fileURLToPath(new URL(file, import.meta.url)).replace(/\.mjs$/, '') + '.results.json', JSON.stringify(out, null, 2))
