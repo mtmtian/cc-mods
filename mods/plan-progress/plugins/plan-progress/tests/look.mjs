@@ -1,4 +1,5 @@
-// renders the bars as the desktop draws them: the track in a sandboxed frame, strips as images
+// renders the bars as the desktop draws them: the track in a sandboxed frame, strips as images, the pill's clock an
+// image the bar's own hover shows
 import fs from 'node:fs'
 import { boot, S, st } from './engine.mjs'
 const E = await boot('./register.mjs')
@@ -12,9 +13,11 @@ const img = (src, w, h) => `<img src="data:image/svg+xml;charset=utf-8,${encodeU
 const svgs = await E.svgs()
 const html = E.plans().map(p => {
   const v = svgs.filter(s => s.alt.startsWith(p.title + ':') || String(s.key ?? '').startsWith(`strip-${p.id}-`))
-  const track = v[0], strips = v.slice(1)
+  const track = v[0], strips = v.slice(1).filter(s => !s.isInteractive)
   const overlay = svgs.slice(svgs.indexOf(track) + 1).find(s => s.isInteractive)
-  return `<div style="position:relative;margin:8px 0">${img(track.source, track.width, track.height)}${strips.map(s => img(s.source, s.width, s.height)).join('')}` +
+  const clock = svgs.slice(svgs.indexOf(track) + 1, svgs.indexOf(overlay)).find(s => s.alt.startsWith(`${p.title} has run for`))
+  return `<div class="trk" style="position:relative;margin:8px 0">${img(track.source, track.width, track.height)}${strips.map(s => img(s.source, s.width, s.height)).join('')}` +
+    (clock ? `<div class="ck">${img(clock.source, clock.width, clock.height)}</div>` : '') +
     `<iframe sandbox="" srcdoc="${esc(overlay.source)}" width="${overlay.width}" height="${overlay.height}" style="border:0;position:absolute;top:0;left:0"></iframe></div>`
 }).join('')
-fs.writeFileSync('look.html', `<!doctype html><html style="color-scheme:dark"><head><meta charset="utf-8"></head><body style="background:#1f1e1d;padding:10px;zoom:1.3">${html}</body></html>`)
+fs.writeFileSync('look.html', `<!doctype html><html style="color-scheme:dark"><head><meta charset="utf-8"><style>.ck{display:none;position:absolute;top:0;left:0}.trk:hover .ck{display:block}</style></head><body style="background:#1f1e1d;padding:10px;zoom:1.3">${html}</body></html>`)

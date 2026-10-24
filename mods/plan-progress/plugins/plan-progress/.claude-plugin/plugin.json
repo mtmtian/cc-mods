@@ -1,8 +1,50 @@
 {
   "name": "plan-progress",
-  "version": "0.7.1-cc.10",
+  "version": "1.0.0-cc.7",
   "description": "Live plan progress bars above the Claude Code prompt: stages, steps, a pixel fill and soft sounds for decision, error and done",
-  "author": { "name": "Kirill Serditov", "url": "https://github.com/zycck" },
+  "author": {
+    "name": "Kirill Serditov",
+    "url": "https://github.com/zycck"
+  },
   "license": "MIT",
+  "userConfig": {
+    "doneBarSeconds": {
+      "type": "number",
+      "title": "Finished bar stays (seconds)",
+      "description": "Seconds a finished bar stays above the prompt while /plan-progress-autoclose is on",
+      "default": 60,
+      "min": 1
+    },
+    "twinkle": {
+      "type": "boolean",
+      "title": "Twinkle the pixel fill",
+      "description": "Animate the dots of the progress fill and of the agent rows. Off, they are drawn still; clocks, glides and status dots still move",
+      "default": true
+    },
+    "foldAgents": {
+      "type": "boolean",
+      "title": "Fold agent strips by default",
+      "description": "A bar's agents share one summary row, an agent waiting on you or failed keeping its own strip, until the bar's chevron or /progress-agents opens them. Off, every strip shows until folded",
+      "default": true
+    },
+    "desktopColors": {
+      "type": "boolean",
+      "title": "Claude desktop colours",
+      "description": "Draw the bars in the Claude desktop app's own colours (running in its clay, waiting in its blue). Off, upstream's violet palette",
+      "default": true
+    },
+    "cacheTimer": {
+      "type": "string",
+      "title": "Cache timer",
+      "description": "Time left before the main conversation's prompt cache lapses, in the footer before tok/s (Cache 42m, then 0:59 … Cache cold). auto starts at 1h and follows what the API reports; 1h or 5m always count from that; off hides it",
+      "default": "auto",
+      "options": [
+        "auto",
+        "1h",
+        "5m",
+        "off"
+      ]
+    }
+  },
   "types": "./types/index.d.ts"
 }

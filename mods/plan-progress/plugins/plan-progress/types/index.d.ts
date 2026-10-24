@@ -34,17 +34,47 @@ export type Plan = {
   agents?: AgentRun[]
   // when the current batch of agents all finished; their strips fold a few seconds later
   agentsDoneAt?: number | null
+  // the person folded the bar's agent strips away (its ▾ button, /progress-agents); the bar keeps one line
+  isFolded?: boolean
+  // the subagent that made the bar and moves it; the main loop's gate and reminders leave such a bar alone
+  byAgent?: string
 }
+// the footer's tokens per second: the last figure (null before the first response) and whether a response streams now
+export type Speed = { rate: number | null; isLive: boolean }
+
+// the settings window's choices kept in the store: auto-close, the sounds, the footer's figure; rev counts the changes
+export type Prefs = { autoclose: boolean; sounds: boolean; speedShown: boolean; updateCheck?: boolean; lang?: string; rev: number }
+// where the settings window's version check or update stands; kept across the reload an update ends with
+export type VersionState =
+  | { phase: 'idle' }
+  | { phase: 'checking' }
+  | { phase: 'latest' }
+  | { phase: 'available'; version: string; url: string }
+  | { phase: 'updating'; version: string }
+  | { phase: 'installed'; version: string }
+  | { phase: 'restart'; version: string }
+  | { phase: 'failed'; what: 'check' | 'update'; detail: string }
+  | { phase: 'folder' }
+
+// cc-mods: the main thread's last request that got a response, for the footer's cache timer: when it was sent, and the
+// model that answered (null when unknown: a resumed session); another model starts a cache of its own
+export type CacheLast = { at: number; model: string | null }
 
 declare module 'claude-code' {
   interface PluginState {
     'plan-progress': {
       plans: Plan[]
       isOpen: boolean
-      // bumped every second while agents run, so elapsed times and folding redraw
+      // bumped for a timed redraw: finished strips folding away, a glide drawn once more standing
       tick: number
-      // bars whose agent strips are opened out (cc-mods: strips fold by default)
-      expanded: string[]
+      speed: Speed
+      // the settings window's choices as this session holds them, counted so each change redraws the footer and the window
+      prefs: Prefs | null
+      version: VersionState
+      // cc-mods: the cache timer's last response, the lifetime auto settled on, and the footer's words now (null: none)
+      cacheLast: CacheLast | null
+      cacheTtl: '5m' | '1h'
+      cache: string | null
     }
   }
 }

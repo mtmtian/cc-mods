@@ -39,6 +39,9 @@ Object.assign(env, {
   CI: 'true',
   CLAUDE_CONFIG_DIR: join(scratch, 'config'),
   CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: '1',
+  // From 2.1.30x the engine lays a --plugin-dir mod's declarations and tsconfig only in a folder it watches, and it
+  // watches none under -p unless this asks it to.
+  CLAUDE_CODE_PLUGIN_DIR_WATCH: '1',
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
   // A future CLI must fail, rather than make a real model request for /cost.
   ANTHROPIC_BASE_URL: 'http://127.0.0.1:9',
