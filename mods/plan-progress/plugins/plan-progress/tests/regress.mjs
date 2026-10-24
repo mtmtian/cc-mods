@@ -5724,6 +5724,26 @@ const C = {
       delete globalThis.OPTIONS
     }
   },
+  async cc_cache_timer_off_clears_the_footer(E) {
+    // turned off in /config, the mod reloads over the same state: the footer drops the words at once and stays clear,
+    // never a label frozen at its last value
+    void E
+    globalThis.OPTIONS = { cacheTimer: 'auto' }
+    try {
+      const F = await boot(file)
+      await reply(F)
+      const on = await cacheIn(F)
+      globalThis.OPTIONS = { cacheTimer: 'off' }
+      await F.reload()
+      const off = await cacheIn(F)
+      F.tick(61 * 60_000)
+      await F.everyTick()
+      const later = await cacheIn(F)
+      return [`on ${on}; off ${off}; 61 min later ${later}`, on === 'Cache 60m' && off === null && later === null]
+    } finally {
+      delete globalThis.OPTIONS
+    }
+  },
   async cc_band_redraws_with_the_cache_words(E) {
     // the footer's words changing redraws the session; the band reads them, so it is drawn afresh then, never handed back
     // as drawn before (a running picture restarted from an old time). Within the same words it is handed back as it was

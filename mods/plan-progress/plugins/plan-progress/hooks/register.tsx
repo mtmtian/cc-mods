@@ -1252,9 +1252,13 @@ function inferTtl(idleMs: number, usage: TurnUsage): CacheTtl | null {
   return usage.cache_creation_input_tokens > 0 ? '5m' : null
 }
 
-// the footer's words now, in whole wall-clock seconds, written only when they change
+// the footer's words now, in whole wall-clock seconds, written only when they change; turned off, words a reload kept from
+// before go, so nothing reads a label frozen at its last value
 async function syncCache($: EngineInterface, now: number) {
-  if (cacheMode === 'off') return
+  if (cacheMode === 'off') {
+    if ((await read($, cacheWords)) !== null) await update($, cacheWords, () => null)
+    return
+  }
   const last = await read($, cacheLast)
   const ttl = cacheMode === 'auto' ? await read($, cacheTtl) : cacheMode
   const words = last === null ? null : cacheText(Math.floor((last.at + CACHE_MS[ttl]) / 1000) - Math.floor(now / 1000))
@@ -3510,7 +3514,7 @@ export const register: Register = (on, options) => {
   // the footer reads how fast the model writes: bright while a response streams, dim with the last exact figure after it
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     const s = await read($, speed)
-    const cache = await read($, cacheWords)
+    const cache = cacheMode === 'off' ? null : await read($, cacheWords)
     await read($, prefs)
     const hasNews = (await read($, versionState)).phase === 'available'
     const { Box, Button, Text } = $.ui.resolve(e)
