@@ -93,6 +93,16 @@ const C = {
     await E.call({ id: 't', done: ['Tests'] })
     return [E.steps('t'), E.steps('t') === 'API:active Tests:done UI:pending Tests:done']
   },
+  // Upstream 0.7.6: duplicate completed titles must carry to one resent step each.
+  async cc_resend_duplicate_done_titles_preserves_one_each(E) {
+    const sent = [S('Repeated', st('Tests', 'active'), 'Tests', 'Tests', 'Tests')]
+    await E.call({ id: 't', title: 'Task', stages: sent })
+    await E.call({ id: 't', done: ['Tests'] })
+    await E.call({ id: 't', done: ['Tests'] })
+    await E.call({ id: 't', stages: sent })
+    const actual = E.steps('t')
+    return [actual, actual === 'Tests:active Tests:done Tests:done Tests:pending']
+  },
   async T14_unknown_refused(E) {
     await create(E)
     const r = await E.call({ id: 't', done: ['Nonexistent'] })

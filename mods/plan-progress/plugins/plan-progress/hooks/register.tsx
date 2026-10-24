@@ -138,12 +138,19 @@ function normalize(input: Raw, prev: Plan | null, now: number, id: string): Plan
 
 // a resent plan keeps what is finished: a step sent as pending under a title that was done stays done
 function carryDone(stages: PlanStage[], before: PlanStage[]): PlanStage[] {
-  const finished = new Map(before.flatMap(s => s.steps).filter(st => isFinished(st.status)).map(st => [st.title.trim().toLowerCase(), st]))
+  const finished = new Map<string, PlanStep[]>()
+  for (const st of before.flatMap(s => s.steps).filter(st => isFinished(st.status))) {
+    const key = st.title.trim().toLowerCase()
+    finished.set(key, [...(finished.get(key) ?? []), st])
+  }
   return stages.map(s => ({
     ...s,
     steps: s.steps.map(st => {
-      const was = finished.get(st.title.trim().toLowerCase())
-      return was && (st.status === 'pending' || st.status === was.status) ? { ...st, status: was.status, doneAt: was.doneAt } : st
+      const queue = finished.get(st.title.trim().toLowerCase())
+      const was = queue?.[0]
+      if (!queue || !was || !(st.status === 'pending' || st.status === was.status)) return st
+      queue.shift()
+      return { ...st, status: was.status, doneAt: was.doneAt }
     }),
   }))
 }
