@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { AgentStatus, EngineInterface, Register, TurnStepChunk } from 'claude-code'
+import type { AgentStatus, EngineInterface, Register, TurnStepChunk, TurnUsage } from 'claude-code'
 
-import type { AgentRun, Plan, PlanStage, PlanState, PlanStep, Prefs, Speed, StepStatus, VersionState } from '../types'
+import type { AgentRun, CacheLast, Plan, PlanStage, PlanState, PlanStep, Prefs, Speed, StepStatus, VersionState } from '../types'
 
 const TOOL = 'mcp__plan-progress__plan_progress'
 const plans = atom({ plugin: 'plan-progress', key: 'plans' } as const, [])
@@ -1225,6 +1225,53 @@ function finish(m: Meter, model: string, outputTokens: number, t: number, hasSer
   }
   if (ms >= 1000 && outputTokens >= 20) remember(model, { tokens: outputTokens, ms })
 }
+// ---------- cc-mods: the prompt cache's time left, in the footer before tok/s ----------
+// how long the main thread's prompt cache stays warm since its last request that got a response, as cache-timer 0.3.2
+// counted it: auto starts at 1h and follows the API (a model switch names the lifetime; a request on the same model sent
+// 5 to 60 idle minutes after the last tells 5m from 1h by a cache read or a re-write). The words change once a minute,
+// then once a second in the last one; each change redraws the footer and the band, which reads them too, so the
+// desktop never hands back a band drawn before the footer last changed
+type CacheTtl = '5m' | '1h'
+const cacheLast = atom({ plugin: 'plan-progress', key: 'cacheLast' } as const, null as CacheLast | null)
+const cacheTtl = atom({ plugin: 'plan-progress', key: 'cacheTtl' } as const, '1h' as CacheTtl)
+const cacheWords = atom({ plugin: 'plan-progress', key: 'cache' } as const, null as string | null)
+const CACHE_MS: Record<CacheTtl, number> = { '5m': 5 * 60_000, '1h': 60 * 60_000 }
+// a request this close past five minutes may still have caught a 5m entry
+const CACHE_SLACK_MS = 15_000
+// the cacheTimer option: auto, a fixed lifetime, or off (a host that passes no options gets off)
+let cacheMode: 'off' | 'auto' | CacheTtl = 'off'
+
+const cacheText = (secondsLeft: number) =>
+  secondsLeft <= 0 ? 'Cache cold' : secondsLeft >= 60 ? `Cache ${Math.floor(secondsLeft / 60)}m` : `Cache 0:${String(secondsLeft).padStart(2, '0')}`
+
+// what one main-thread response says about the lifetime: only a request sent 5 to 60 minutes after the last, on the
+// same model, tells 5m from 1h
+function inferTtl(idleMs: number, usage: TurnUsage): CacheTtl | null {
+  if (idleMs <= CACHE_MS['5m'] + CACHE_SLACK_MS || idleMs >= CACHE_MS['1h']) return null
+  if (usage.cache_read_input_tokens > 0) return '1h'
+  return usage.cache_creation_input_tokens > 0 ? '5m' : null
+}
+
+// the footer's words now, in whole wall-clock seconds, written only when they change
+async function syncCache($: EngineInterface, now: number) {
+  if (cacheMode === 'off') return
+  const last = await read($, cacheLast)
+  const ttl = cacheMode === 'auto' ? await read($, cacheTtl) : cacheMode
+  const words = last === null ? null : cacheText(Math.floor((last.at + CACHE_MS[ttl]) / 1000) - Math.floor(now / 1000))
+  if (words !== (await read($, cacheWords))) await update($, cacheWords, () => words)
+}
+
+// a main-thread request that got a response starts the cache over
+async function noteResponse($: EngineInterface, sentAt: number, usage: TurnUsage) {
+  const previous = await read($, cacheLast)
+  if (cacheMode === 'auto' && previous !== null && previous.model === usage.model) {
+    const seen = inferTtl(sentAt - previous.at, usage)
+    if (seen !== null) await update($, cacheTtl, () => seen)
+  }
+  await update($, cacheLast, () => ({ at: sentAt, model: usage.model }))
+  await syncCache($, await $.clock.now())
+}
+
 // the footer's settings control on the desktop: ⚙ asked for in its text form (U+FE0E), one colour with the chip the
 // desktop draws a footer Button as, where a font might pick a coloured emoji. The footer draws no pictures, only text
 // and Buttons, so an icon there is a character
@@ -3009,6 +3056,8 @@ export const register: Register = (on, options) => {
   // cc-mods: the manifest's defaults turn these on; a host that passes no options gets upstream's folding and palette
   isFoldByDefault = options?.foldAgents === true
   palette = options?.desktopColors === true ? DESKTOP_PALETTE : null
+  const timer = options?.cacheTimer
+  cacheMode = timer === 'auto' || timer === '1h' || timer === '5m' ? timer : 'off'
   STRIP_STYLE = stripStyle(STRIP_TWINKLE)
   STRIP_STILL = stripStyle('')
 
@@ -3158,6 +3207,27 @@ export const register: Register = (on, options) => {
     }
   })
 
+  // cc-mods: a resumed transcript's cache is as old as its last response
+  on('classic.SessionStart', async ($, e, next) => {
+    if (cacheMode !== 'off' && e.seconds_since_last_response !== undefined) {
+      const now = await $.clock.now()
+      const at = now - e.seconds_since_last_response * 1000
+      await update($, cacheLast, () => ({ at, model: null }))
+      await syncCache($, now)
+    }
+    return next(e)
+  })
+
+  // cc-mods: the one place the engine names the cache's lifetime outright
+  on('classic.PostModelSwitch', async ($, e, next) => {
+    if (cacheMode === 'auto') {
+      const ttl = e.cache_ttl
+      await update($, cacheTtl, () => ttl)
+      await syncCache($, await $.clock.now())
+    }
+    return next(e)
+  })
+
   on('config.set', { key: 'theme' }, async ($, e, next) => {
     const r = await next(e)
     if (r.deny === undefined) {
@@ -3244,6 +3314,8 @@ export const register: Register = (on, options) => {
       for (const p of list) if (hasLeft(p, now)) await dropPlan($, p.id, now)
       syncFrames($, now)
       await syncTint($, now)
+      // cc-mods: the cache timer's words, once a minute, once a second in the last one
+      await syncCache($, now)
       // from the latest list: the one read above may predate a bar dropped just now
       await saveNow($)
       // clocks count inside the frame, so the only timed redraw is folding finished strips away
@@ -3438,6 +3510,7 @@ export const register: Register = (on, options) => {
   // the footer reads how fast the model writes: bright while a response streams, dim with the last exact figure after it
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     const s = await read($, speed)
+    const cache = await read($, cacheWords)
     await read($, prefs)
     const hasNews = (await read($, versionState)).phase === 'available'
     const { Box, Button, Text } = $.ui.resolve(e)
@@ -3447,6 +3520,7 @@ export const register: Register = (on, options) => {
     const hasGear = e.surface === 'desktop' || e.viewport?.isFullscreen === true
     return (
       <Box flexDirection="row" alignItems="center" gap={1}>
+        {cache ? <Text dimColor>{cache}</Text> : null}
         {isSpeedShown ? <Text dimColor={!s.isLive}>{speedLabel(s)}</Text> : null}
         {hasGear && hasNews && e.surface !== 'desktop' ? (
           <Button key="settings" plain label="⚙" onPress={() => openSettings($)}>
@@ -3728,6 +3802,8 @@ export const register: Register = (on, options) => {
     // nothing changed is handed back as it was last drawn. Rebuilt from that very source, a picture starts its glide
     // over (the pill went back to where it set off and slid again), and its clocks and stream run from the old time
     await read($, speed)
+    // cc-mods: and the cache timer's words, which redraw the footer as well
+    await read($, cacheWords)
     const now = await $.clock.now()
     // a bar with agent strips gets a fold chevron before its ✕ (up folds, down shows), in a cell every row keeps so
     // the rows line up; wide enough for the desktop's own button, which a narrower cell squeezes to a dot
@@ -3927,6 +4003,8 @@ export const register: Register = (on, options) => {
       return result
     }
 
+    // cc-mods: when the request went, for the cache timer
+    const sentAt = cacheMode === 'off' ? 0 : await $.clock.now()
     // the main conversation's response, timed piece by piece for the footer's tokens per second; the footer is written
     // at most once a second, and only when what it reads changes
     const m = newMeter()
@@ -3973,6 +4051,7 @@ export const register: Register = (on, options) => {
         yield c
       }
       const result = await stream.result
+      if (cacheMode !== 'off' && result.usage) await noteResponse($, sentAt, result.usage)
       if (stop) {
         // the tools the API ran itself are known once the response is whole, each with when it started and ended; one
         // whose result never came waited until the end

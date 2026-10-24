@@ -56,6 +56,10 @@ export type VersionState =
   | { phase: 'failed'; what: 'check' | 'update'; detail: string }
   | { phase: 'folder' }
 
+// cc-mods: the main thread's last request that got a response, for the footer's cache timer: when it was sent, and the
+// model that answered (null when unknown: a resumed session); another model starts a cache of its own
+export type CacheLast = { at: number; model: string | null }
+
 declare module 'claude-code' {
   interface PluginState {
     'plan-progress': {
@@ -67,6 +71,10 @@ declare module 'claude-code' {
       // the settings window's choices as this session holds them, counted so each change redraws the footer and the window
       prefs: Prefs | null
       version: VersionState
+      // cc-mods: the cache timer's last response, the lifetime auto settled on, and the footer's words now (null: none)
+      cacheLast: CacheLast | null
+      cacheTtl: '5m' | '1h'
+      cache: string | null
     }
   }
 }

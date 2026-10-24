@@ -1,6 +1,6 @@
 {
   "name": "plan-progress",
-  "version": "1.0.0-cc.5",
+  "version": "1.0.0-cc.6",
   "description": "Live plan progress bars above the Claude Code prompt: stages, steps, a pixel fill and soft sounds for decision, error and done",
   "author": {
     "name": "Kirill Serditov",
@@ -32,6 +32,18 @@
       "title": "Claude desktop colours",
       "description": "Draw the bars in the Claude desktop app's own colours (running in its clay, waiting in its blue). Off, upstream's violet palette",
       "default": true
+    },
+    "cacheTimer": {
+      "type": "string",
+      "title": "Cache timer",
+      "description": "Time left before the main conversation's prompt cache lapses, in the footer before tok/s (Cache 42m, then 0:59 … Cache cold). auto starts at 1h and follows what the API reports; 1h or 5m always count from that; off hides it",
+      "default": "auto",
+      "options": [
+        "auto",
+        "1h",
+        "5m",
+        "off"
+      ]
     }
   },
   "types": "./types/index.d.ts"

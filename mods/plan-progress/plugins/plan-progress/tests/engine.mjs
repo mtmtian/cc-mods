@@ -289,7 +289,8 @@ export async function boot(file, kept = new Map()) {
     // a model response streamed through the turn.step hook: pieces are [chunk, ms to wait before it]; the stop chunk
     // carries output_tokens, and the step's result lists the tools the API ran itself when serverToolUses is given.
     // Resolves to the chunks the hook passed on
-    stream: async (pieces, { agentId, outputTokens, model = 'claude-opus-5-5', serverToolUses } = {}) => {
+    // cc-mods: `usage` adds to the response's usage (the cache read and write counts)
+    stream: async (pieces, { agentId, outputTokens, model = 'claude-opus-5-5', serverToolUses, usage: extra } = {}) => {
       let done
       const result = new Promise(r => (done = r))
       const beneath = (async function* () {
@@ -297,7 +298,7 @@ export async function boot(file, kept = new Map()) {
           if (wait) await new Promise(r => setTimeout(r, wait))
           yield chunk
         }
-        const usage = { input_tokens: 10, output_tokens: outputTokens ?? 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model }
+        const usage = { input_tokens: 10, output_tokens: outputTokens ?? 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, ...extra, model }
         yield { kind: 'stop', stopReason: 'end_turn', usage }
         const res = { turnId: 't', index: 0, answer: '', toolUses: [], stopReason: 'end_turn', usage, ...(serverToolUses ? { serverToolUses } : {}) }
         done(res)

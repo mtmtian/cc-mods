@@ -4,7 +4,7 @@
 
 ## plan-progress
 
-> cc-mods fork: this copy differs from upstream (the desktop app's own colours, agent strips name their role and context, fold into a summary row by default and join the bar opened after them, a permission dialog left waiting sounds, finished bars stay 60 s with auto-close, no update check). See the [cc-mods README](../../README.md#mods).
+> cc-mods fork: this copy differs from upstream (the desktop app's own colours, a prompt-cache timer in the footer, agent strips name their role and context, fold into a summary row by default and join the bar opened after them, a permission dialog left waiting sounds, finished bars stay 60 s with auto-close, no update check). See the [cc-mods README](../../README.md#mods).
 
 Live progress bars above the Claude Code prompt. Claude splits a task into stages and steps, and the bar fills as it works. The subagents for each task are listed under its bar.
 
@@ -24,6 +24,7 @@ Live progress bars above the Claude Code prompt. Claude splits a task into stage
 - Bars are saved per session and come back when the session is resumed
 - Short sounds for a question, an error, completion, and a permission dialog left waiting on you
 - The footer shows how fast the main conversation writes, `⚡ N tok/s`; subagents are not counted
+- Before it, the time left on the main conversation's prompt cache: `Cache 42m`, the seconds in its last minute, then `Cache cold` (send the next message before it lapses and it reads the conversation from the cache). `cacheTimer` in `/config`: `auto` (starts at 1h and follows what the API reports), `1h`, `5m` or `off`
 - The ⚙ next to it (in the desktop app and the fullscreen terminal) opens a settings window: effects, auto-close and its seconds, sounds, the figure itself, the mod's version and the update check; `/plan-progress-settings` opens it anywhere. The window speaks the language set in `/config`, else the app's, else the system's
 - Updates: the version in the settings window, pressed, looks for a newer release, and Update installs it and reloads the mod in place (if the reload does not take, it asks for a restart). Once every 6 hours the mod also checks by itself and marks the ⚙ with 🔹 (● in the terminal) when a new version is out. A check is one request to the GitHub API (`api.github.com/repos/zycck/claude-mods/releases`), with no account or session data in it; turn it off with Check for updates in the window or with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`. A copy installed from a folder is not checked, and neither is this cc-mods build: it updates through cc-mods
 - Works in the desktop app and in the terminal

@@ -6,6 +6,9 @@ import { boot, S, st } from './engine.mjs'
 const file = process.argv[2] ?? './register.mjs'
 const three = () => [S('One', st('A', 'active'), 'B'), S('Two', 'C')]
 const create = (E, id = 't', stages = three(), title = 'Task') => E.call({ id, title, stages })
+// cc-mods: one main-thread response (or an agent's, with agentId), and the footer's cache words now (null: none)
+const reply = (E, opts = {}) => E.stream([[{ kind: 'text', index: 0, text: 'x' }, 0]], { outputTokens: 30, ...opts })
+const cacheIn = async E => (await E.footer('desktop', true)).filter(n => n.type === 'Text').map(n => (n.children ?? []).flat().join('')).find(s => s.startsWith('Cache')) ?? null
 const res = r => r.deny ?? r.result
 const glyphs = cells => {
   const w = new Uint32Array(Uint8Array.from(Buffer.from(cells, 'base64')).buffer)
@@ -5645,6 +5648,100 @@ const C = {
       await fold?.props.onPress()
       const shown = (await F.view('t')).strips.length
       return [`folded ${F.bar('t')?.isFolded}, strips ${hidden}, chevron ${!!fold}, after a press ${shown}`, hidden === 0 && !!fold && shown === 1]
+    } finally {
+      delete globalThis.OPTIONS
+    }
+  },
+  async cc_cache_timer_counts_down_in_the_footer(E) {
+    // with cacheTimer on (auto, the manifest's default): nothing before the first response; then the minutes left of an
+    // hour in the footer, the seconds in the last minute, cold after it. A host that passes no options shows none
+    const plain = await (async () => (await reply(E), cacheIn(E)))()
+    globalThis.OPTIONS = { cacheTimer: 'auto' }
+    try {
+      const F = await boot(file)
+      const before = await cacheIn(F)
+      await reply(F)
+      const fresh = await cacheIn(F)
+      F.tick(30 * 60_000)
+      await F.everyTick()
+      const half = await cacheIn(F)
+      F.tick(29 * 60_000 + 30_000)
+      await F.everyTick()
+      const last = await cacheIn(F)
+      F.tick(31_000)
+      await F.everyTick()
+      const cold = await cacheIn(F)
+      return [
+        `no options ${plain}; before ${before}; ${fresh} → 30 min ${half} → 59:30 ${last} → 60:01 ${cold}`,
+        plain === null && before === null && fresh === 'Cache 60m' && half === 'Cache 30m' && last === 'Cache 0:30' && cold === 'Cache cold',
+      ]
+    } finally {
+      delete globalThis.OPTIONS
+    }
+  },
+  async cc_cache_timer_follows_the_main_thread_and_the_api(E) {
+    // a subagent's response starts nothing; ten idle minutes then a re-write on the same model says 5m, a cache read
+    // says 1h, a re-write on another model says nothing; the 5m option counts from five minutes whatever comes
+    void E
+    const out = []
+    globalThis.OPTIONS = { cacheTimer: 'auto' }
+    try {
+      const A = await boot(file)
+      await A.spawn('ag1', 'Scan')
+      await reply(A, { agentId: 'ag1' })
+      out.push(`agent ${await cacheIn(A)}`)
+      for (const [name, usage, model] of [['miss', { cache_creation_input_tokens: 5000 }, undefined], ['hit', { cache_read_input_tokens: 5000 }, undefined], ['other model', { cache_creation_input_tokens: 5000 }, 'claude-sonnet-5-5']]) {
+        const F = await boot(file)
+        await reply(F)
+        F.tick(10 * 60_000)
+        await reply(F, { usage, ...(model ? { model } : {}) })
+        out.push(`${name} ${await cacheIn(F)}`)
+      }
+      globalThis.OPTIONS = { cacheTimer: '5m' }
+      const G = await boot(file)
+      await reply(G)
+      G.tick(10 * 60_000)
+      await reply(G, { usage: { cache_read_input_tokens: 5000 } })
+      out.push(`5m ${await cacheIn(G)}`)
+    } finally {
+      delete globalThis.OPTIONS
+    }
+    const want = 'agent null; miss Cache 5m; hit Cache 60m; other model Cache 60m; 5m Cache 5m'
+    return [out.join('; '), out.join('; ') === want]
+  },
+  async cc_cache_timer_resumes_and_takes_a_model_switch(E) {
+    // a resumed session counts from its transcript's last response; a model switch names the lifetime outright
+    void E
+    globalThis.OPTIONS = { cacheTimer: 'auto' }
+    try {
+      const F = await boot(file)
+      await F.raw('classic.SessionStart', { hook_event_name: 'SessionStart', source: 'resume', seconds_since_last_response: 600 })
+      const resumed = await cacheIn(F)
+      await F.raw('classic.PostModelSwitch', { hook_event_name: 'PostModelSwitch', cache_ttl: '5m', context_tokens: 0, prompt_cache_warm: false, estimated_cache_write_usd: 0 })
+      const switched = await cacheIn(F)
+      return [`resumed 10 min on ${resumed}; after a switch to 5m ${switched}`, resumed === 'Cache 50m' && switched === 'Cache cold']
+    } finally {
+      delete globalThis.OPTIONS
+    }
+  },
+  async cc_band_redraws_with_the_cache_words(E) {
+    // the footer's words changing redraws the session; the band reads them, so it is drawn afresh then, never handed back
+    // as drawn before (a running picture restarted from an old time). Within the same words it is handed back as it was
+    void E
+    globalThis.OPTIONS = { cacheTimer: 'auto' }
+    try {
+      const F = await boot(file)
+      await create(F)
+      await reply(F)
+      F.tick(1000)
+      await F.everyTick()
+      const first = await F.reask()
+      const same = (await F.reask()) === first
+      F.tick(60_000)
+      await F.everyTick()
+      const words = await cacheIn(F)
+      const redrawn = (await F.reask()) !== first
+      return [`same words handed back ${same}; at ${words} drawn afresh ${redrawn}`, same && redrawn && words === 'Cache 58m']
     } finally {
       delete globalThis.OPTIONS
     }
