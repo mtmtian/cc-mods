@@ -1082,6 +1082,9 @@ const drawnRows = new Map<string, { key: string; html: string; until: number }>(
 type Drawn = { type?: string; props?: Record<string, unknown>; children?: unknown[] } | string | null | undefined
 const hasContent = (n: unknown): boolean => {
   if (n === null || n === undefined || n === false) return false
+  // cc-mods: the engine's own mark, where the band would draw what it draws itself (a survey), shows nothing while the bars
+  // do: counted, it put a gap under the bars that read as the band sitting off its centre on the desktop
+  if (typeof n === 'object' && (n as { type?: unknown }).type === 'engine') return false
   if (typeof n === 'string') return n.trim() !== ''
   if (Array.isArray(n)) return n.some(hasContent)
   const el = n as Exclude<Drawn, string | null | undefined>
@@ -2012,13 +2015,17 @@ function chime($: EngineInterface, prev: PlanState | undefined, next: PlanState)
 
 // builds a bar from the latest stored one inside update(), so back-to-back calls never work from a stale copy;
 // make returns a string to refuse, and the list stays as it was
-async function editPlan($: EngineInterface, id: string, make: (prev: Plan | null) => Plan | string, isQuiet = false): Promise<Plan | string> {
+// cc-mods: join hands what else changes in that same write, before placeBar keeps MAX_BARS (adoptInto)
+async function editPlan($: EngineInterface, id: string, make: (prev: Plan | null) => Plan | string, isQuiet = false, join?: Join): Promise<Plan | string> {
   let prev: Plan | undefined
   let made = '' as Plan | string
   await update($, plans, list => {
     prev = list.find(p => p.id === id)
     made = make(prev ?? null)
-    return typeof made === 'string' ? [...list] : placeBar(list, made)
+    if (typeof made === 'string') return [...list]
+    const [rest, bar] = join ? join(list, made) : [list, made]
+    made = bar
+    return placeBar(rest, bar)
   })
   if (typeof made === 'string') return made
   if (!isQuiet) chime($, prev?.state, made.state)
@@ -2062,21 +2069,26 @@ function syncAuto(p: Plan, now: number): Plan {
   return { ...p, agentsDoneAt, startedAt, stages: [{ name: isOver ? 'Agents' : `${running} running`, steps }], state }
 }
 
-// cc-mods: agents the main thread started this turn, before it opened the bar for that work, move from the Agents bar
-// onto it in their order and depth; the Agents bar goes once it holds none
-function adoptAgents(list: readonly Plan[], id: string, ids: ReadonlySet<string>, now: number): Plan[] {
+// cc-mods: agents the main thread started this turn, before it opened the bar for that work, join that bar in their order
+// and depth, in the write that places it, before the bar limit could push the Agents bar and their strips out. Only a bar
+// the call opens takes them (a new id, or a finished bar's id taken for the next task); the Agents bar goes once it holds
+// none
+type Join = (list: readonly Plan[], made: Plan) => [readonly Plan[], Plan]
+function adoptInto(list: readonly Plan[], made: Plan, ids: ReadonlySet<string>, now: number): [readonly Plan[], Plan] {
+  const was = list.find(p => p.id === made.id)
   const moving = (list.find(p => p.id === AGENTS)?.agents ?? []).filter(a => ids.has(a.id))
-  if (moving.length === 0) return [...list]
-  return list.flatMap(p => {
-    if (p.id === AGENTS) {
-      const left = (p.agents ?? []).filter(a => !ids.has(a.id))
-      return left.length > 0 ? [syncAuto({ ...p, agents: left }, now)] : []
-    }
-    if (p.id !== id) return [p]
-    // as addRun does, a batch that has finished makes room; a teammate resting between its turns stays
-    const kept = p.agentsDoneAt ? keepStrips(p.agents ?? [], a => resting.has(a.id)) : [...(p.agents ?? [])]
-    return [syncAuto({ ...p, agents: [...kept, ...moving], agentsDoneAt: null }, now)]
+  if ((was && was.state !== 'done') || !isOpenPlan(made) || made.byAgent || moving.length === 0) return [list, made]
+  const rest = list.flatMap(p => {
+    if (p.id !== AGENTS) return [p]
+    const left = (p.agents ?? []).filter(a => !ids.has(a.id))
+    return left.length > 0 ? [syncAuto({ ...p, agents: left }, now)] : []
   })
+  // the strips the bar keeps, as placeBar would keep them; as addRun does, a batch that has finished makes room and a
+  // teammate resting between its turns stays
+  const agents = 'agents' in made ? (made.agents ?? []) : (was?.agents ?? [])
+  const doneAt = 'agents' in made ? made.agentsDoneAt : was?.agentsDoneAt
+  const kept = doneAt ? keepStrips(agents, a => resting.has(a.id)) : [...agents]
+  return [rest, syncAuto({ ...made, agents: [...kept, ...moving], agentsDoneAt: null }, now)]
 }
 
 function addRun(p: Plan, run: AgentRun, parentId: string | undefined, now: number): Plan {
@@ -3007,7 +3019,7 @@ export const register: Register = (on, options) => {
   let hasRefused = false
   let isWaitingOnBackground = false
   let hasWarnedNoTool = false
-  // cc-mods: agents started this turn onto the Agents bar, for the bar the turn opens next (adoptAgents)
+  // cc-mods: agents started this turn onto the Agents bar, for the bar the turn opens next (adoptInto)
   const toAdopt = new Set<string>()
 
   on('prompt.attachment', async ($, e, next) => {
@@ -3283,9 +3295,8 @@ export const register: Register = (on, options) => {
     // rather than landing on the plan-mode bar
     const id = slug(str(raw.id, 60)) || slug(str(raw.title, 80))
     if (!id) return { deny: 'plan_progress: the id needs a letter or a digit, like "fix-login".' }
-    // cc-mods: whether this call opens the bar (a new id, or a finished bar's id taken for the next task), for adoptAgents
-    const before = (await read($, plans)).find(p => p.id === id)
-    const isOpening = !before || before.state === 'done'
+    // cc-mods: agents the main thread started this turn before it opened this bar join it in the same write (adoptInto)
+    const join: Join | undefined = !e.agentId && toAdopt.size > 0 ? (list, made) => adoptInto(list, made, toAdopt, now) : undefined
     const next = await editPlan(
       $,
       id,
@@ -3300,14 +3311,14 @@ export const register: Register = (on, options) => {
         return owner ? { ...made, byAgent: owner } : made
       },
       Boolean(e.agentId),
+      join,
     )
     if (typeof next === 'string') return { deny: next }
-    // cc-mods: agents the main thread started this turn before it opened this bar move onto it
-    if (!e.agentId && toAdopt.size > 0 && isOpening && isOpenPlan(next) && !next.byAgent) {
-      await update($, plans, list => adoptAgents(list, id, toAdopt, now))
-      // homed on the bar where their strips landed, never on one an agent gone from the Agents bar meanwhile never reached;
-      // only one still at work: a finished one left the map at its end, and a resume finds its strip there and wakes it
-      for (const a of (await read($, plans)).find(p => p.id === id)?.agents ?? []) if (toAdopt.has(a.id) && agentHome.has(a.id)) agentHome.set(a.id, id)
+    const landed = (next.agents ?? []).filter(a => toAdopt.has(a.id))
+    if (landed.length > 0) {
+      // homed on the bar their strips joined; only one still at work: a finished one left the map at its end, and a
+      // resume finds its strip there and wakes it
+      for (const a of landed) if (agentHome.has(a.id)) agentHome.set(a.id, id)
       toAdopt.clear()
     }
     if (!e.agentId || next.byAgent === e.agentId) handedOver.delete(id)

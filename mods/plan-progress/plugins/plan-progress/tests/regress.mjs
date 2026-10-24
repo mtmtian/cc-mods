@@ -2448,7 +2448,9 @@ const C = {
     const rate = s => Number(s.replace(/[^\d.]/g, ''))
     const response = ms => [[{ kind: 'engine', ref: 1 }, 0], [{ kind: 'text', index: 0, text: 'x'.repeat(40) }, ms]]
     const t0 = performance.now()
-    await E.stream(response(1000), { outputTokens: 200 })
+    // cc-mods: 1.1 s, not 1 s: a response under a second is left out, and one timed to the millisecond on a 1000 ms timer
+    // came out a hair under it now and then (CI read 100, the second response alone)
+    await E.stream(response(1100), { outputTokens: 200 })
     const a = (performance.now() - t0) / 1000
     const t1 = performance.now()
     await E.stream(response(2000), { outputTokens: 200 })
@@ -2457,7 +2459,8 @@ const C = {
     const expected = 400 / (a + b)
     await E.stream(response(1000), { outputTokens: 50, model: 'claude-haiku-5-5' })
     const other = rate(await text())
-    const ok = Math.abs(both - expected) <= 2 && both < 145 && other <= 50 && other > 40
+    // cc-mods: well clear of a mean of the two speeds, whatever the two times came to
+    const ok = Math.abs(both - expected) <= 2 && (200 / a + 200 / b) / 2 - both > 5 && other <= 50 && other > 40
     return [`two responses ${both} (time-weighted ${expected.toFixed(1)}, mean of speeds would be ${((200 / a + 200 / b) / 2).toFixed(1)}); another model ${other}`, ok]
   },
   async pill_glide_is_not_replayed(E) {
@@ -5645,6 +5648,36 @@ const C = {
     } finally {
       delete globalThis.OPTIONS
     }
+  },
+  async cc_engine_mark_below_adds_no_gap(E) {
+    // the desktop hands the band its own mark (an element of type engine) as what lies below, which draws nothing while
+    // the bars show: no gap under the bars for it, so the band is as tall above them as below (seen on the desktop as a
+    // band sitting high in its card)
+    globalThis.BELOW = () => ({ type: 'engine', props: {}, children: [] })
+    try {
+      await create(E)
+      const desktop = await E.raw('ui.render', { component: 'AbovePrompt', surface: 'desktop', props: { bodyColumns: 140, hasSurvey: false } })
+      const terminal = await E.raw('ui.render', { component: 'AbovePrompt', surface: 'terminal', props: { bodyColumns: 120, hasSurvey: false } })
+      const gaps = [desktop, terminal].map(t => Number(t?.props?.gap ?? 0))
+      const drawn = [desktop, terminal].filter(t => (t?.children ?? []).length > 1).length
+      return [`gap over the engine's mark: desktop ${gaps[0]}, terminal ${gaps[1]}; bars on ${drawn}`, gaps.every(g => g === 0) && drawn === 2]
+    } finally {
+      delete globalThis.BELOW
+    }
+  },
+  async cc_agents_join_before_the_bar_limit(E) {
+    // two bars wait on the person and an agent sits on the Agents bar, three in all: the bar the turn opens next takes
+    // the agent in the same write, before the limit of three could push the Agents bar, and its strip, out
+    await create(E, 'w1', three(), 'Wait one')
+    await E.call({ id: 'w1', state: 'needs_input', note: 'which?' })
+    await create(E, 'w2', three(), 'Wait two')
+    await E.call({ id: 'w2', state: 'needs_input', note: 'which?' })
+    await E.turnStart()
+    await E.spawn('ag1', 'Build page')
+    await create(E)
+    await E.agentTool('ag1', 'Bash')
+    const where = E.plans().filter(p => (p.agents ?? []).some(a => a.id === 'ag1')).map(p => `${p.id}:${p.agents.find(a => a.id === 'ag1').tool}`)
+    return [`bars ${E.plans().map(p => p.id).join(', ')}; ag1 on [${where}]`, where.join() === 't:Bash' && E.plans().length === 3]
   },
   async cc_adopted_agent_that_finished_wakes_again(E) {
     // an agent that finished before the main loop opened its bar moves onto it as finished; resumed, its strip wakes,
