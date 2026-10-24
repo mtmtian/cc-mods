@@ -1041,10 +1041,10 @@ function summedAgents(p: Plan, now: number, max: number): Shown | null {
 const shownAgents = (p: Plan, now: number, max: number): Shown | null =>
   p.isFolded === true ? null : isSummed(p) ? summedAgents(p, now, max) : visibleAgents(p, now, max)
 // a bar gets a fold button while it has strips to show or fold; folded with none left (the batch over, or after a
-// restart) it keeps the choice for its next agents but shows no button that would do nothing. cc-mods: folded into the
-// summary row, only while that row hides some
+// restart) it keeps the choice for its next agents but shows no button that would do nothing. cc-mods: with foldAgents
+// on, while the summary row hides some, or while the strips are folded away (a fold kept from upstream's mode)
 const canFold = (p: Plan, now: number, max: number) =>
-  isFoldByDefault ? (summedAgents(p, now, max)?.isSummary ?? false) : visibleAgents(p, now, max) !== null
+  isFoldByDefault && p.isFolded !== true ? (summedAgents(p, now, max)?.isSummary ?? false) : visibleAgents(p, now, max) !== null
 // the fold a press leaves: upstream's folded and shown, or (cc-mods) the summary row and shown
 const foldedTo = (isFolding: boolean) => (isFolding ? (isFoldByDefault ? undefined : true) : false)
 
@@ -1268,8 +1268,10 @@ function tally(list: readonly AgentRun[]): string {
     .map(([n, word]) => `${n} ${word}`)
     .join(' · ')
 }
-// the summary row's words: "4 agents · …" alone under the bar, "3 more agents · …" under strips of their own
+// the "more" row's words: "4 agents" alone under the bar (only the summary row stands alone), "3 more agents" under
+// strips of their own; then what they do by state for the summary row, upstream's count of the finished ones otherwise
 const moreLabel = (v: Shown) => plural(v.hidden.length, v.shown.length === 0 ? 'agent' : 'more agent')
+const moreWords = (v: Shown) => `${moreLabel(v)} · ${v.isSummary ? tally(v.hidden) : `${v.hidden.filter(a => a.state === 'done').length} done`}`
 
 // the agent's name, its model and effort in a dimmer parenthesis; the parenthesis starts where the title ends,
 // since a title may hold a " (" of its own
@@ -1372,18 +1374,16 @@ function stripsSvg(v: Shown, all: AgentRun[], W: number, now: number): StripRow[
   if (v.hidden.length > 0) {
     const y = v.shown.length === 0 ? 5 : STRIP_GAP
     // cc-mods: the summary row of folded strips says what they do by state, with a live dot while any of them runs
-    const more = v.isSummary ? moreLabel(v) : plural(v.hidden.length, 'more agent')
-    const summary = v.isSummary ? `${more} · ${tally(v.hidden)}` : `${more} · ${v.hidden.filter(a => a.state === 'done').length} done`
     const isLive = v.isSummary === true && v.hidden.some(a => a.state === 'running')
     const textX = GUTTER + (isLive ? 19 : 10)
-    const moreText = stripW(summary) <= W - textX - 4 ? summary : fitStrip(more, W - textX - 4)
+    const moreText = stripW(moreWords(v)) <= W - textX - 4 ? moreWords(v) : fitStrip(moreLabel(v), W - textX - 4)
     rows.push({
       key: '+',
       height: y + STRIP_H,
       until: 0,
       html:
         backing(y) +
-        gutter(y, v.isSummary && v.shown.length === 0 ? String(v.hidden.length) : `+${v.hidden.length}`, 'gm') +
+        gutter(y, v.shown.length === 0 ? String(v.hidden.length) : `+${v.hidden.length}`, 'gm') +
         `<rect x="${GUTTER}" y="${y}" width="${SW}" height="${STRIP_H}" rx="${STRIP_H / 2}" fill="#808080" fill-opacity=".14"/>` +
         (isLive ? `<circle cx="${GUTTER + 10}" cy="${y + STRIP_H / 2}" r="3" fill="${agentColor('running')}" class="sd"/>` : '') +
         `<text x="${textX}" y="${y + 11.5}" class="sn st">${esc(moreText)}</text>`,
@@ -1708,9 +1708,7 @@ function stripCells(v: Shown, W: number, now: number): { cells: string; rows: nu
     const tint = mix(back, [128, 128, 128], 0.16)
     pill(g, y, 0, W, () => tint)
     // cc-mods: the summary row of folded strips says what they do by state
-    const doneCount = v.hidden.filter(a => a.state === 'done').length
-    const line = v.isSummary ? `${v.shown.length === 0 ? '' : '+'}${moreLabel(v)} · ${tally(v.hidden)}` : `+${plural(v.hidden.length, 'more agent')} · ${doneCount} done`
-    g.text(2, y, fit(line, W - 4), pack(dimOn(tint, hex(scheme().dim))), pack(tint))
+    g.text(2, y, fit(`${v.shown.length === 0 ? '' : '+'}${moreWords(v)}`, W - 4), pack(dimOn(tint, hex(scheme().dim))), pack(tint))
   }
   return { cells: g.encode(), rows }
 }
@@ -3006,7 +3004,8 @@ export const register: Register = (on, options) => {
     isPlanTouched = false
     hasRefused = false
     isWaitingOnBackground = false
-    toAdopt.clear()
+    // cc-mods: the main loop's turn alone; each agent's run starts a turn of its own right after its spawn
+    if (!e.agentId) toAdopt.clear()
     // the engine hands the tool to the session over HTTP on 127.0.0.1; an antivirus web filter or a proxy that
     // catches loopback breaks that, and the tool is simply missing, so say why once instead of drawing nothing
     if (hasTool !== true) {
@@ -3284,7 +3283,8 @@ export const register: Register = (on, options) => {
     // cc-mods: agents the main thread started this turn before it opened this bar move onto it
     if (!e.agentId && toAdopt.size > 0 && isOpening && isOpenPlan(next) && !next.byAgent) {
       await update($, plans, list => adoptAgents(list, id, toAdopt, now))
-      for (const a of toAdopt) if (agentHome.get(a) === AGENTS) agentHome.set(a, id)
+      // homed on the bar where their strips landed, never on one an agent gone from the Agents bar meanwhile never reached
+      for (const a of (await read($, plans)).find(p => p.id === id)?.agents ?? []) if (toAdopt.has(a.id)) agentHome.set(a.id, id)
       toAdopt.clear()
     }
     if (!e.agentId || next.byAgent === e.agentId) handedOver.delete(id)

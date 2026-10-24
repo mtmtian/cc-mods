@@ -5603,6 +5603,9 @@ const C = {
     await E.turnStart()
     await E.spawn('ag1', 'Build page')
     await E.spawn('ag1c', 'Check page', 'ag1')
+    // each agent's own run starts a turn of its own: the engine raises turn.start for every loop, with its agentId
+    await E.raw('turn.start', { text: '', turnId: 'ag1-1', agentId: 'ag1' })
+    await E.raw('turn.start', { text: '', turnId: 'ag1c-1', agentId: 'ag1c' })
     await create(E)
     await E.agentTool('ag1', 'Bash')
     const on = id => (E.bar(id)?.agents ?? []).map(a => `${a.id}:${a.depth}:${a.tool}`).join(',')
@@ -5620,6 +5623,28 @@ const C = {
     await E.call({ id: 'fix', state: 'running' })
     const on = id => (E.bar(id)?.agents ?? []).map(a => a.id).join(',')
     return [`sub [${on('sub')}], old [${on('old')}], fix [${on('fix')}], agents bar [${on('agents:auto')}]`, on('sub') === '' && on('old') === '' && on('fix') === '' && on('agents:auto') === 'ag1']
+  },
+  async cc_fold_kept_from_upstream_mode_still_opens(E) {
+    // a bar folded away while foldAgents was off keeps its fold through a reload with it on: its lone agent stays hidden,
+    // and the chevron is still there to show it
+    void E
+    globalThis.OPTIONS = { foldAgents: false }
+    try {
+      const F = await boot(file)
+      await F.turnStart()
+      await create(F)
+      await F.spawn('ag1', 'Lone agent')
+      await walkAll(await F.band()).find(n => n.props?.key === 'fold-t').props.onPress()
+      globalThis.OPTIONS = { foldAgents: true }
+      await F.reload()
+      const fold = walkAll(await F.band()).find(n => n.props?.key === 'fold-t')
+      const hidden = (await F.view('t')).strips.length
+      await fold?.props.onPress()
+      const shown = (await F.view('t')).strips.length
+      return [`folded ${F.bar('t')?.isFolded}, strips ${hidden}, chevron ${!!fold}, after a press ${shown}`, hidden === 0 && !!fold && shown === 1]
+    } finally {
+      delete globalThis.OPTIONS
+    }
   },
   async cc_agents_bar_goes_once_emptied(E) {
     await E.turnStart()
