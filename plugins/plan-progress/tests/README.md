@@ -8,11 +8,13 @@ The real `hooks/register.tsx`, compiled and driven through its hooks with a stub
 cd plugins/plan-progress/tests
 node compile.cjs ../hooks/register.tsx register.mjs
 node regress.mjs          # expected behaviour, must print "all passed"
-node scenarios.mjs        # the 32 audit cases, prints what each one does now
+node scenarios.mjs        # the 32 audit cases and 4 newer ones, prints what each one does now
 node look.mjs             # writes look.html: the bars as the desktop draws them, for a browser
 ```
 
 `compile.cjs` needs TypeScript: a global or local `typescript` package, or its path in the `TYPESCRIPT` environment variable.
+
+Another build: compile it anywhere with `stub.mjs` next to it, then `node regress.mjs file:///abs/build.mjs` (`ONLY=case1,case2` runs only those cases) and `node scenarios.mjs file:///abs/build.mjs [SKILL.md] [case prefix]`, which writes `build.results.json` next to the build.
 
 ## Live demo (in a Claude Code session, after the mod has reloaded)
 
@@ -29,4 +31,4 @@ Ask Claude: "run the plan-progress live demo from tests/README.md". The steps ar
    - "Find icon imports": Grep icon imports and `<style` in .svelte files, reply with the library and the count.
 5. As each agent reports: demo-api `{done:["Services"]}`, then `{done:["Routes"]}`, then `{next:true}`; demo-ui `{next:true}` per report.
 
-What to look at: strips under the right bar with tool word and a live clock, the pill showing the time on hover, step and stage checkpoints with their times on hover, strips folding 5 s after the last agent, a finished bar in still green dots with the time in its pill.
+What to look at: strips under the right bar with tool word and a live clock, the pill showing the time on hover, step and stage checkpoints with their times on hover, strips folding 5 s after the last agent, a finished bar in green dots, its wave streaming at half the running speed, with the time in its pill.

@@ -1,9 +1,10 @@
 // each audit claim replayed through the real hooks; holds = the behaviour the audit describes happened
 import fs from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { boot, S, st } from './engine.mjs'
 
 const file = process.argv[2] ?? './register.mjs'
-const skill = fs.readFileSync(process.argv[3] ?? '../skills/plan-progress/SKILL.md', 'utf8')
+const skill = fs.readFileSync(process.argv[3] ?? new URL('../skills/plan-progress/SKILL.md', import.meta.url), 'utf8')
 const three = () => [S('One', st('A', 'active'), 'B'), S('Two', 'C')]
 const create = (E, id = 't', stages = three(), title = 'Task') => E.call({ id, title, stages })
 const res = r => r.deny ?? r.result
@@ -268,4 +269,5 @@ for (const [id, fn] of Object.entries(T)) {
   }
 }
 for (const r of out) console.log(`${r.holds ? 'HOLDS ' : 'NO    '} ${r.id.padEnd(32)} ${r.observed}`)
-fs.writeFileSync(file.replace(/\.mjs$/, '') + '.results.json', JSON.stringify(out, null, 2))
+// next to the build that was loaded, resolved as boot resolves it, so a file:/// URL works and any cwd does
+fs.writeFileSync(fileURLToPath(new URL(file, import.meta.url)).replace(/\.mjs$/, '') + '.results.json', JSON.stringify(out, null, 2))

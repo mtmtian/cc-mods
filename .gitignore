@@ -3,3 +3,5 @@ tsconfig.json
 plugins/plan-progress/tests/register.mjs
 plugins/plan-progress/tests/look.html
 plugins/plan-progress/tests/*.results.json
+# session files Claude Code plugins leave in any folder (autoharness locks)
+.claude/
