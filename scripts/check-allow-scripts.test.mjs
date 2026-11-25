@@ -50,9 +50,8 @@ after(() => rmSync(scratch, { recursive: true, force: true }))
 function run(change = () => {}) {
   const packageJson = structuredClone(basePackageJson)
   const lock = structuredClone(basePackageLock)
-  change(packageJson, lock)
-  packageJson.devDependencies = lock.packages?.['']?.devDependencies
   const dir = mkdtempSync(join(scratch, 'case-'))
+  change(packageJson, lock, dir)
   writeFileSync(join(dir, 'package.json'), JSON.stringify(packageJson))
   writeFileSync(join(dir, 'package-lock.json'), JSON.stringify(lock))
   const result = spawnSync(process.execPath, [script, dir], { encoding: 'utf8' })
@@ -67,18 +66,19 @@ const renameKey = (allowScripts, from, to) => {
 
 const escapeRegExp = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-const depend = (lock, from, name, spec) => {
+const depend = (pkg, lock, from, name, spec) => {
   const field = from === '' ? 'devDependencies' : 'dependencies'
   lock.packages[from][field] = { ...lock.packages[from][field], [name]: spec }
+  if (from === '') pkg[field] = { ...pkg[field], [name]: spec }
 }
 
 const gitSpec = 'github:example/from-git'
 const gitResolved = 'git+ssh://git@github.com/example/from-git.git#0123456789abcdef0123456789abcdef01234567'
 
-const nestedNative = lock => {
+const nestedNative = (pkg, lock) => {
   lock.packages['node_modules/x'] = { version: '1.0.0', resolved: 'https://registry.npmjs.org/x/-/x-1.0.0.tgz' }
-  depend(lock, '', 'x', '^1.0.0')
-  depend(lock, 'node_modules/x', 'native', '1.0.1')
+  depend(pkg, lock, '', 'x', '^1.0.0')
+  depend(pkg, lock, 'node_modules/x', 'native', '1.0.1')
   lock.packages['node_modules/x/node_modules/native'] = {
     ...lock.packages['node_modules/native'],
     version: '1.0.1',
@@ -158,14 +158,14 @@ describe('check-allow-scripts', () => {
 
   it('accepts one key listing every locked version joined with ||', () => {
     const result = run((pkg, lock) => {
-      nestedNative(lock)
+      nestedNative(pkg, lock)
       renameKey(pkg.allowScripts, 'native@1.0.0', 'native@1.0.0 || 1.0.1')
     })
     assert.equal(result.status, 0, result.stderr)
   })
 
   it('fails and names both versions when one of two locked versions is approved', () => {
-    const result = run((pkg, lock) => nestedNative(lock))
+    const result = run((pkg, lock) => nestedNative(pkg, lock))
     assert.equal(result.status, 1)
     assert.match(result.stderr, /locks native with an install script at 1\.0\.0, 1\.0\.1/)
     assert.match(result.stderr, /change the key to "native@1\.0\.0 \|\| 1\.0\.1"/)
@@ -179,7 +179,7 @@ describe('check-allow-scripts', () => {
         dependencies: { bundled: '1.0.0' },
         bundleDependencies: ['bundled'],
       }
-      depend(lock, '', 'x', '^1.0.0')
+      depend(pkg, lock, '', 'x', '^1.0.0')
       lock.packages['node_modules/x/node_modules/bundled'] = {
         version: '1.0.0',
         resolved: 'https://registry.npmjs.org/bundled/-/bundled-1.0.0.tgz',
@@ -192,7 +192,7 @@ describe('check-allow-scripts', () => {
 
   it('fails on an install script in a git dependency', () => {
     const result = run((pkg, lock) => {
-      depend(lock, '', 'from-git', gitSpec)
+      depend(pkg, lock, '', 'from-git', gitSpec)
       lock.packages['node_modules/from-git'] = { version: '1.0.0', resolved: gitResolved, hasInstallScript: true }
     })
     assert.equal(result.status, 1)
@@ -201,7 +201,7 @@ describe('check-allow-scripts', () => {
 
   it('fails on a git dependency even when the lockfile shows no install script', () => {
     const result = run((pkg, lock) => {
-      depend(lock, '', 'from-git', gitSpec)
+      depend(pkg, lock, '', 'from-git', gitSpec)
       lock.packages['node_modules/from-git'] = { version: '1.0.0', resolved: gitResolved }
     })
     assert.equal(result.status, 1)
@@ -210,7 +210,7 @@ describe('check-allow-scripts', () => {
 
   it('fails on a file: dependency even when the lockfile shows no install script', () => {
     const result = run((pkg, lock) => {
-      depend(lock, '', 'local', 'file:../local')
+      depend(pkg, lock, '', 'local', 'file:../local')
       lock.packages['node_modules/local'] = { resolved: '../local', link: true }
       lock.packages['../local'] = { version: '1.0.0' }
     })
@@ -220,7 +220,7 @@ describe('check-allow-scripts', () => {
 
   it('fails on a registry-shaped tarball address written as a dependency', () => {
     const result = run((pkg, lock) => {
-      depend(lock, '', 'native', 'https://registry.npmjs.org/native/-/native-1.0.0.tgz')
+      depend(pkg, lock, '', 'native', 'https://registry.npmjs.org/native/-/native-1.0.0.tgz')
     })
     assert.equal(result.status, 1)
     assert.match(result.stderr, /node_modules\/native: it is a dependency on "https:\/\/registry\.npmjs\.org\/native\/-\/native-1\.0\.0\.tgz"/)
@@ -235,12 +235,12 @@ describe('check-allow-scripts', () => {
       }
     })
     assert.equal(result.status, 1)
-    assert.match(result.stderr, /node_modules\/orphan: nothing in package-lock\.json depends on it/)
+    assert.match(result.stderr, /node_modules\/orphan: nothing in package\.json or package-lock\.json depends on it/)
   })
 
   it('fails when a transitive dependency is a git dependency of its parent', () => {
     const result = run((pkg, lock) => {
-      depend(lock, 'node_modules/@scope/tool', 'deep', gitSpec)
+      depend(pkg, lock, 'node_modules/@scope/tool', 'deep', gitSpec)
       lock.packages['node_modules/deep'] = { version: '1.2.3', resolved: gitResolved, hasInstallScript: true }
     })
     assert.equal(result.status, 1)
@@ -249,16 +249,16 @@ describe('check-allow-scripts', () => {
 
   it('holds a nested copy to the spec of the package that requires it', () => {
     const result = run((pkg, lock) => {
-      nestedNative(lock)
-      depend(lock, 'node_modules/x', 'native', gitSpec)
+      nestedNative(pkg, lock)
+      depend(pkg, lock, 'node_modules/x', 'native', gitSpec)
     })
     assert.equal(result.status, 1)
     assert.match(result.stderr, /node_modules\/x\/node_modules\/native: it is a dependency on "github:example\/from-git"/)
     assert.doesNotMatch(result.stderr, /^ {2}node_modules\/native:/m)
   })
 
-  const deep = lock => {
-    depend(lock, 'node_modules/@scope/tool', 'deep', '^1.0.0')
+  const deep = (pkg, lock) => {
+    depend(pkg, lock, 'node_modules/@scope/tool', 'deep', '^1.0.0')
     lock.packages['node_modules/deep'] = {
       version: '1.2.3',
       resolved: 'https://registry.npmjs.org/deep/-/deep-1.2.3.tgz',
@@ -267,14 +267,14 @@ describe('check-allow-scripts', () => {
   }
 
   it('asks for an approval of a transitive dependency with an install script', () => {
-    const result = run((pkg, lock) => deep(lock))
+    const result = run((pkg, lock) => deep(pkg, lock))
     assert.equal(result.status, 1)
     assert.match(result.stderr, /add "deep@1\.2\.3": true/)
   })
 
   it('passes when a transitive dependency with an install script is approved', () => {
     const result = run((pkg, lock) => {
-      deep(lock)
+      deep(pkg, lock)
       pkg.allowScripts['deep@1.2.3'] = true
     })
     assert.equal(result.status, 0, result.stderr)
@@ -282,10 +282,11 @@ describe('check-allow-scripts', () => {
 
   it('approves an npm: alias by the package it resolves to', () => {
     const result = run((pkg, lock) => {
-      depend(lock, '', 'tool-alias', 'npm:@scope/tool@2.0.0')
+      depend(pkg, lock, '', 'tool-alias', 'npm:@scope/tool@2.0.0')
       lock.packages['node_modules/tool-alias'] = lock.packages['node_modules/@scope/tool']
       delete lock.packages['node_modules/@scope/tool']
       delete lock.packages[''].devDependencies['@scope/tool']
+      delete pkg.devDependencies['@scope/tool']
     })
     assert.equal(result.status, 0, result.stderr)
   })
@@ -331,12 +332,12 @@ describe('check-allow-scripts', () => {
 
   it('lists the versions to update when several keys for one package disagree with the lockfile', () => {
     const result = run((pkg, lock) => {
-      nestedNative(lock)
+      nestedNative(pkg, lock)
       pkg.allowScripts['native@1.0.0'] = false
       pkg.allowScripts['native@0.9.0'] = true
     })
     assert.equal(result.status, 1)
-    assert.match(result.stderr, /Versions no longer locked: 0\.9\.0\. Versions with no key: 1\.0\.1\./)
+    assert.match(result.stderr, /Versions not in package-lock\.json: 0\.9\.0\. Versions locked with an install script and no key: 1\.0\.1\./)
     assert.doesNotMatch(result.stderr, /replace them with/)
   })
 
@@ -352,7 +353,8 @@ describe('check-allow-scripts', () => {
       lock.packages['node_modules/renamed'] = lock.packages['node_modules/native']
       delete lock.packages['node_modules/native']
       delete lock.packages[''].devDependencies.native
-      depend(lock, '', 'renamed', '1.0.0')
+      delete pkg.devDependencies.native
+      depend(pkg, lock, '', 'renamed', '1.0.0')
     })
     assert.equal(result.status, 0, result.stderr)
   })
@@ -370,6 +372,183 @@ describe('check-allow-scripts', () => {
       pkg.allowScripts['native@1.0.0'] = false
     })
     assert.equal(result.status, 0, result.stderr)
+  })
+
+  const nativeTarball = 'https://registry.npmjs.org/native/-/native-1.0.0.tgz'
+
+  it('fails when package.json has overrides', () => {
+    const result = run(pkg => {
+      pkg.overrides = { native: nativeTarball }
+    })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /package\.json overrides: .*does not apply them/)
+  })
+
+  it('ignores an empty overrides object', () => {
+    const result = run(pkg => {
+      pkg.overrides = {}
+    })
+    assert.equal(result.status, 0, result.stderr)
+  })
+
+  it('fails once for workspaces without calling their dependencies orphans', () => {
+    const result = run((pkg, lock) => {
+      pkg.workspaces = ['packages/*']
+      delete pkg.devDependencies.native
+      delete lock.packages[''].devDependencies.native
+      lock.packages['node_modules/tool'] = { resolved: 'packages/tool', link: true }
+      lock.packages['packages/tool'] = { version: '1.0.0', devDependencies: { native: '1.0.0' } }
+    })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /package\.json workspaces: /)
+    assert.equal(result.stderr.trim().split('\n').length, 2, result.stderr)
+  })
+
+  it('fails when npm-shrinkwrap.json exists', () => {
+    const result = run((pkg, lock, dir) => writeFileSync(join(dir, 'npm-shrinkwrap.json'), '{}'))
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /npm-shrinkwrap\.json: npm reads it instead of package-lock\.json/)
+  })
+
+  it('reads the root dependencies from package.json, not from the lockfile root entry', () => {
+    const result = run(pkg => {
+      pkg.devDependencies.native = nativeTarball
+    })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /node_modules\/native: it is a dependency on "https:\/\/registry\.npmjs\.org\/native\/-\/native-1\.0\.0\.tgz"/)
+  })
+
+  for (const prefix of ['NPM:', 'NpM:']) {
+    it(`reads an alias written with the prefix ${prefix}`, () => {
+      const result = run((pkg, lock) => {
+        depend(pkg, lock, '', 'tool-alias', `${prefix}@scope/tool@2.0.0`)
+        lock.packages['node_modules/tool-alias'] = lock.packages['node_modules/@scope/tool']
+        delete lock.packages['node_modules/@scope/tool']
+        delete lock.packages[''].devDependencies['@scope/tool']
+        delete pkg.devDependencies['@scope/tool']
+      })
+      assert.equal(result.status, 0, result.stderr)
+    })
+  }
+
+  describe('one dependency name declared in several fields of one package', () => {
+    const bothNative = (pkg, lock) => {
+      nestedNative(pkg, lock)
+      renameKey(pkg.allowScripts, 'native@1.0.0', 'native@1.0.0 || 1.0.1')
+    }
+
+    it('keeps the dependencies spec over a peer tarball spec', () => {
+      const result = run((pkg, lock) => {
+        bothNative(pkg, lock)
+        lock.packages['node_modules/x'].peerDependencies = { native: nativeTarball }
+      })
+      assert.equal(result.status, 0, result.stderr)
+    })
+
+    it('keeps the optional spec over a dependencies tarball spec', () => {
+      const result = run((pkg, lock) => {
+        bothNative(pkg, lock)
+        lock.packages['node_modules/x'].dependencies = { native: nativeTarball }
+        lock.packages['node_modules/x'].optionalDependencies = { native: '1.0.1' }
+      })
+      assert.equal(result.status, 0, result.stderr)
+    })
+
+    it('keeps the root devDependencies spec over a dependencies tarball spec', () => {
+      const result = run(pkg => {
+        pkg.dependencies = { native: nativeTarball }
+      })
+      assert.equal(result.status, 0, result.stderr)
+    })
+
+    it('keeps the root devDependencies tarball spec over a dependencies registry spec', () => {
+      const result = run(pkg => {
+        pkg.dependencies = { native: '1.0.0' }
+        pkg.devDependencies.native = nativeTarball
+      })
+      assert.equal(result.status, 1)
+      assert.match(result.stderr, /node_modules\/native: it is a dependency on "https:/)
+    })
+  })
+
+  describe('a package reached only through a peer dependency', () => {
+    const peerOnly = pkg => {
+      pkg.peerDependencies = { peered: '1.0.0' }
+    }
+    const peered = lock => {
+      lock.packages['node_modules/peered'] = {
+        version: '1.0.0',
+        resolved: 'https://registry.npmjs.org/peered/-/peered-1.0.0.tgz',
+        hasInstallScript: true,
+      }
+    }
+
+    it('needs a key for its install script', () => {
+      const result = run((pkg, lock) => {
+        peerOnly(pkg)
+        peered(lock)
+      })
+      assert.equal(result.status, 1)
+      assert.match(result.stderr, /add "peered@1\.0\.0": true/)
+    })
+
+    it('passes once its install script is approved', () => {
+      const result = run((pkg, lock) => {
+        peerOnly(pkg)
+        peered(lock)
+        pkg.allowScripts['peered@1.0.0'] = true
+      })
+      assert.equal(result.status, 0, result.stderr)
+    })
+  })
+
+  for (const [length, status] of [[256, 0], [257, 1]]) {
+    it(`reads a resolved version ${length} characters long as semver does`, () => {
+      const result = run((pkg, lock) => {
+        const version = `2.0.0+${'a'.repeat(length - '2.0.0+'.length)}`
+        lock.packages['node_modules/@scope/tool'].resolved = `https://registry.npmjs.org/@scope/tool/-/tool-${version}.tgz`
+      })
+      assert.equal(result.status, status, result.stderr)
+      if (status === 1) assert.match(result.stderr, /npm cannot read a name and version from its resolved address/)
+    })
+  }
+
+  it('fails on a key whose name npm reads as a file', () => {
+    const result = run((pkg, lock) => {
+      depend(pkg, lock, '', 'native.tgz', '1.0.0')
+      lock.packages['node_modules/native.tgz'] = {
+        version: '1.0.0',
+        resolved: 'https://registry.npmjs.org/native.tgz/-/native.tgz-1.0.0.tgz',
+        hasInstallScript: true,
+      }
+      pkg.allowScripts['native.tgz@1.0.0'] = true
+    })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /"native\.tgz@1\.0\.0": npm does not read "native\.tgz" as a registry package name/)
+  })
+
+  it('does not suggest one merged key when a non-exact key is mixed with an exact one', () => {
+    const result = run((pkg, lock) => {
+      nestedNative(pkg, lock)
+      pkg.allowScripts['native@1.0.0'] = false
+      pkg.allowScripts['native@v1.0.1 || 1.0.2'] = true
+    })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /"native@v1\.0\.1 \|\| 1\.0\.2": not an exact-version key/)
+    assert.match(result.stderr, /Versions locked with an install script and no key: 1\.0\.1\./)
+    assert.doesNotMatch(result.stderr, /Use "native@1\.0\.0 \|\| 1\.0\.1"/)
+    assert.doesNotMatch(result.stderr, /change the key to/)
+  })
+
+  it('tells a version locked without an install script from one that is not locked', () => {
+    const result = run((pkg, lock) => {
+      nestedNative(pkg, lock)
+      delete lock.packages['node_modules/x/node_modules/native'].hasInstallScript
+      pkg.allowScripts['native@1.0.1'] = true
+    })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /Versions locked without an install script: 1\.0\.1\./)
+    assert.doesNotMatch(result.stderr, /not in package-lock\.json/)
   })
 
   it('fails on a lockfile without a packages field', () => {
