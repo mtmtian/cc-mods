@@ -18,7 +18,7 @@
     "typescript": "7.0.2"
   },
   "allowScripts": {
-    "@anthropic-ai/claude-code@2.1.308": true,
-    "bun@1.4.2": true
+    "@anthropic-ai/claude-code@2.1.311": true,
+    "bun@1.4.4": true
   }
 }
