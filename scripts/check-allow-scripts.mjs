@@ -3,33 +3,6 @@ import { basename, join, resolve } from 'node:path'
 
 const EXACT_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$/
 
-function compareIdentifiers(a, b) {
-  const aNumeric = /^\d+$/.test(a)
-  const bNumeric = /^\d+$/.test(b)
-  if (aNumeric && bNumeric) return Number(a) - Number(b)
-  if (aNumeric !== bNumeric) return aNumeric ? -1 : 1
-  return a < b ? -1 : a > b ? 1 : 0
-}
-
-function compareVersions(a, b) {
-  const [aCore, aPre] = a.split(/-(.*)/s)
-  const [bCore, bPre] = b.split(/-(.*)/s)
-  const aParts = aCore.split('.')
-  const bParts = bCore.split('.')
-  for (let i = 0; i < 3; i++) {
-    const diff = Number(aParts[i]) - Number(bParts[i])
-    if (diff !== 0) return diff
-  }
-  if (aPre === undefined || bPre === undefined) return (aPre === undefined) - (bPre === undefined)
-  const aIds = aPre.split('.')
-  const bIds = bPre.split('.')
-  for (let i = 0; i < Math.min(aIds.length, bIds.length); i++) {
-    const diff = compareIdentifiers(aIds[i], bIds[i])
-    if (diff !== 0) return diff
-  }
-  return aIds.length - bIds.length
-}
-
 // npm reads a registry package's identity from the lockfile's `resolved` address, never from
 // its path in node_modules or from the tarball's own package.json, so this does the same
 // (arborist/lib/version-from-tgz.js).
@@ -67,7 +40,7 @@ function readLockfile(lock) {
   const locked = new Map()
   const problems = []
   for (const [path, entry] of Object.entries(lock.packages)) {
-    if (!path.includes('node_modules/') || entry.inBundle || entry.link) continue
+    if (path === '' || entry.inBundle || entry.link) continue
     const identity = registryIdentity(entry.resolved)
     if (identity) {
       addVersion(locked, identity.name, identity.version)
@@ -87,7 +60,7 @@ function splitKey(key) {
   return at > 0 ? { name: key.slice(0, at), range: key.slice(at + 1) } : { name: key, range: null }
 }
 
-const sortedVersions = versions => [...versions].sort(compareVersions)
+const sortedVersions = versions => [...versions].sort()
 const approvalKey = (name, versions) => `${name}@${sortedVersions(versions).join(' || ')}`
 const quoteAll = keys => keys.map(key => `"${key}"`).join(', ')
 
