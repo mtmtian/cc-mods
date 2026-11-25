@@ -57,9 +57,16 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
+      - name: Show Node.js and npm versions
+        run: |
+          node --version
+          npm --version
       # The two native tools need their pinned package's postinstall to link the binary.
+      # --strict-allow-scripts fails before installing anything when the lockfile records an
+      # install script that allowScripts does not approve at the locked version, such as after
+      # a Dependabot bump. The README says how to update the approval.
       - name: Install locked development tools
-        run: npm ci --no-audit --no-fund
+        run: npm ci --strict-allow-scripts --no-audit --no-fund
       - name: Run logic and regression tests
         run: npm test
       - name: Validate plugins, test native hooks and check types
