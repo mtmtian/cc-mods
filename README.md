@@ -44,7 +44,7 @@ While working on a mod, `--plugin-dir` loads the checkout directly and reloads o
 Use the Node.js version in [`.node-version`](.node-version), then run from the repo root:
 
 ```bash
-npm ci
+npm ci --strict-allow-scripts
 npm run ci
 ```
 
@@ -52,14 +52,13 @@ The root [CI workflow](.github/workflows/ci.yml) runs on every pull request, pus
 
 | Check | What it covers |
 | --- | --- |
-| `npm run check:allow-scripts` | `allowScripts` in `package.json` against the install scripts `package-lock.json` locks: each key must be an exact version that is locked and has an install script, and each locked install script needs a key. Each mismatch is printed with what to change. Runs before `npm ci` in CI |
-| `npm test` | md-prompt's Bun tests, plan-progress's asserted stub-engine regressions, the upstream-status script's local Git fixtures, and the tests for the allowScripts check |
+| `npm test` | md-prompt's Bun tests, plan-progress's asserted stub-engine regressions, and the upstream-status script's local Git fixtures |
 | `npm run check:plugins` | Marketplace/source/name/license consistency, strict Claude manifest validation, native hook tests for md-prompt, and TypeScript checks for both plugins |
 | Workflow and shell checks | actionlint for the active root workflow and ShellCheck for the repository's shell scripts |
 
 The plugin checks copy the plugins into a temporary directory, use a fresh Claude config, and generate SDK declarations for the locked CLI version there. `/cost` is a local command: no login or model API key is needed. The API endpoint is set to a closed local port, so an accidental model request fails. The temporary copies are removed even when a check fails. These checks do not replace testing real prompt editing, desktop rendering or audio in Claude Desktop.
 
-Development tools are version-pinned in `package.json` and `package-lock.json`; Actions use full commit SHAs. Dependabot proposes weekly npm-tool and Action updates; update actionlint's version and checksum together in the workflow. Claude and Bun require their native-binary install scripts, approved by exact version in `allowScripts`. When updating either package, review its install script, update the approval with `npm install-scripts approve <package>`, and rerun the checks. `npm run check:allow-scripts` fails when an approval no longer matches the lockfile, for example after Dependabot bumps one of them, and prints what to change. It only covers packages installed from the npm registry. Other sources (git, tarball addresses, local directories) make it fail, because their install scripts cannot be read before install. This repository writes keys as `name@1.2.3`, or exact versions joined with ` || `, with no `v` prefix and no `+build`. npm also accepts bare names and some other forms, and the check rejects them. `overrides`, `workspaces` and `npm-shrinkwrap.json` make the check fail too, because it does not read them. CI has read-only repository permissions, cancels superseded PR runs, and uses neither uploaded artifacts nor dependency caches.
+Development tools are version-pinned in `package.json` and `package-lock.json`; Actions use full commit SHAs. Dependabot proposes weekly npm-tool and Action updates; update actionlint's version and checksum together in the workflow. Claude and Bun require their native-binary install scripts, approved by exact version in `allowScripts`. When updating either package, review its install script, update the approval with `npm install-scripts approve <package>`, and rerun the checks. CI installs with `npm ci --strict-allow-scripts`, so a locked install script without a matching approval fails the install before anything is downloaded, for example after Dependabot bumps one of these packages. npm does not report approvals left over for versions that are no longer locked; remove those by hand. CI has read-only repository permissions, cancels superseded PR runs, and uses neither uploaded artifacts nor dependency caches.
 
 ## Check and pull upstream changes
 

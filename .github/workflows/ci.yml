@@ -57,11 +57,15 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
-      - name: Check install-script approvals against the lockfile
-        run: npm run check:allow-scripts
+      - name: Show Node.js and npm versions
+        run: |
+          node --version
+          npm --version
       # The two native tools need their pinned package's postinstall to link the binary.
+      # --strict-allow-scripts fails before anything is downloaded when a locked package
+      # has an install script that allowScripts does not cover, such as an old exact version.
       - name: Install locked development tools
-        run: npm ci --no-audit --no-fund
+        run: npm ci --strict-allow-scripts --no-audit --no-fund
       - name: Run logic and regression tests
         run: npm test
       - name: Validate plugins, test native hooks and check types
