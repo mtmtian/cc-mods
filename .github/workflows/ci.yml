@@ -57,6 +57,8 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
+      - name: Check install-script approvals against the lockfile
+        run: npm run check:allow-scripts
       # The two native tools need their pinned package's postinstall to link the binary.
       - name: Install locked development tools
         run: npm ci --no-audit --no-fund

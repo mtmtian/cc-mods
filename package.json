@@ -2,12 +2,14 @@
   "name": "cc-mods",
   "private": true,
   "scripts": {
-    "test": "npm run test:unit && npm run test:plan-progress && npm run test:upstream",
+    "test": "npm run test:unit && npm run test:plan-progress && npm run test:upstream && npm run test:allow-scripts",
     "test:unit": "bun test mods/md-prompt/tests",
     "test:plan-progress": "cd mods/plan-progress/plugins/plan-progress/tests && node compile.cjs ../hooks/register.tsx register.mjs && node regress.mjs",
     "test:upstream": "bash scripts/test-upstream-status.sh",
+    "test:allow-scripts": "node --test scripts/check-allow-scripts.test.mjs",
+    "check:allow-scripts": "node scripts/check-allow-scripts.mjs",
     "check:plugins": "node scripts/check-plugins.mjs",
-    "ci": "npm test && npm run check:plugins"
+    "ci": "npm run check:allow-scripts && npm test && npm run check:plugins"
   },
   "engines": {
     "node": ">=24"
