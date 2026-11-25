@@ -58,7 +58,16 @@ The root [CI workflow](.github/workflows/ci.yml) runs on every pull request, pus
 
 The plugin checks copy the plugins into a temporary directory, use a fresh Claude config, and generate SDK declarations for the locked CLI version there. `/cost` is a local command: no login or model API key is needed. The API endpoint is set to a closed local port, so an accidental model request fails. The temporary copies are removed even when a check fails. These checks do not replace testing real prompt editing, desktop rendering or audio in Claude Desktop.
 
-Development tools are version-pinned in `package.json` and `package-lock.json`; Actions use full commit SHAs. Dependabot proposes weekly npm-tool and Action updates; update actionlint's version and checksum together in the workflow. Claude and Bun require their native-binary install scripts, approved by exact version in `allowScripts`. When updating either package, review its install script, update the approval with `npm install-scripts approve <package>`, and rerun the checks. CI installs with `npm ci --strict-allow-scripts`, so a locked install script without a matching approval fails the install before anything is downloaded, for example after Dependabot bumps one of these packages. npm does not report approvals left over for versions that are no longer locked; remove those by hand. CI has read-only repository permissions, cancels superseded PR runs, and uses neither uploaded artifacts nor dependency caches.
+Development tools are version-pinned in `package.json` and `package-lock.json`; Actions use full commit SHAs. Dependabot proposes weekly npm-tool and Action updates; update actionlint's version and checksum together in the workflow. Claude and Bun require their native-binary install scripts, approved by exact version in `allowScripts`. CI installs with `npm ci --strict-allow-scripts`: when the lockfile records an install script for a package and `allowScripts` does not approve its locked version, as after Dependabot bumps Claude or Bun, npm fails before installing anything and lists each `<package>@<version>` to approve. To update an approval, install without running scripts, review the new version's install script, approve it, and rerun the checks:
+
+```bash
+npm ci --ignore-scripts
+npm install-scripts approve <package>
+npm ci --strict-allow-scripts
+npm run ci
+```
+
+`npm install-scripts approve` reads the installed packages, so on a fresh checkout it finds nothing until the first command has run; it replaces the package's old key with the installed version. npm does not report keys left for versions that are no longer locked; remove those by hand. The check does not cover a dependency bundled inside another package, or a `binding.gyp` build the lockfile does not record as an install script; those still run without an approval. CI has read-only repository permissions, cancels superseded PR runs, and uses neither uploaded artifacts nor dependency caches.
 
 ## Check and pull upstream changes
 
